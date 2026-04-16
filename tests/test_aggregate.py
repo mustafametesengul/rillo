@@ -1,4 +1,5 @@
-from typing import Literal, Union
+import asyncio
+from typing import Literal
 from uuid import UUID, uuid4
 
 import nats
@@ -7,7 +8,6 @@ from pydantic import BaseModel
 
 from rillo import Aggregate
 from rillo.nats import NATSRepository
-from rillo.snapshot import SnapshotStore
 
 
 class UserSignedUp(BaseModel):
@@ -27,7 +27,7 @@ class UserState(BaseModel):
     account_deleted: bool
 
 
-class User(Aggregate[UserState, UserEvent]):
+class User(Aggregate[UserState]):
     def __init__(self, id: UUID | None = None) -> None:
         super().__init__(str(id or uuid4()), UserState, "schema_version")
         self._add_mutator(UserSignedUp, self.apply_user_signed_up)
@@ -62,21 +62,25 @@ class User(Aggregate[UserState, UserEvent]):
 
 
 class UserRepository(NATSRepository[User]):
-    def __init__(self, js: JetStreamContext, snapshot_store: SnapshotStore) -> None:
-        super().__init__(js, subject_prefix="user", snapshot_store=snapshot_store)
+    def __init__(self, js: JetStreamContext) -> None:
+        super().__init__(js, subject_prefix="user")
 
 
-async def test_user_repository(js: JetStreamContext) -> None:
+async def test_user_repository() -> None:
     host = "localhost"
     port = 4222
     nc = await nats.connect(f"nats://{host}:{port}")
     js = nc.jetstream()
 
     user_repository = UserRepository(js)
-    await user_repository.register("identity_users")
+    await user_repository.register("test")
 
     user = User()
     user.sign_up_with_username("testuser", "hashedpassword")
     await user_repository.save(user)
 
     await nc.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(test_user_repository())

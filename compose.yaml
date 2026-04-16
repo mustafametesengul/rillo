@@ -1,0 +1,12 @@
+services:
+  nats:
+    image: nats:latest
+    command: [ "-js" ]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats_data:/data
+
+volumes:
+  nats_data:

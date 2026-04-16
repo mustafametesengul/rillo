@@ -38,31 +38,33 @@ class NATSRepository(Repository[A]):
         self,
         js: JetStreamContext,
         subject_prefix: str,
-        snapshot_store: SnapshotStore,
+        snapshot_store: SnapshotStore | None = None,
     ) -> None:
         self._js = js
         self._subject_prefix = subject_prefix
-        self._snapshot_store = snapshot_store
+        super().__init__(snapshot_store=snapshot_store)
 
     async def register(self, name: str) -> None:
         await self._js.add_stream(name=name, subjects=[f"{self._subject_prefix}.*"])
 
     @override
     async def _save_events(
-        self, aggregate_id: str, events: list[str], expected_version: int | None
+        self, aggregate_id: str, events: list[bytes], expected_version: int | None
     ) -> None:
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
         for event in events:
             await self._js.publish(
                 subject,
-                event.encode("utf-8"),
+                event,
             )
 
     @override
     async def _load_events(
-        self, aggregate_id: str, from_version: int | None
-    ) -> list[str]:
+        self,
+        aggregate_id: str,
+        from_version: int | None,
+    ) -> list[bytes]:
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
         events = []
@@ -72,7 +74,7 @@ class NATSRepository(Repository[A]):
             sub = await self._js.subscribe(subject)
             while True:
                 msg = await sub.next_msg(timeout=0.1)
-                events.append(msg.data.decode("utf-8"))
+                events.append(msg.data)
         except NatsTimeoutError:
             pass
         finally:

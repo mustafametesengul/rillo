@@ -1,6 +1,6 @@
-from typing import Annotated, Any, Callable, Generic, TypeVar, Union
+from typing import Any, Callable, Generic, TypeVar
 
-from pydantic import BaseModel, Discriminator, JsonValue, TypeAdapter
+from pydantic import BaseModel
 
 
 class OptimisticConcurrencyError(Exception):
@@ -26,11 +26,24 @@ class Aggregate(Generic[S]):
         self._event_discriminator: str | None = event_discriminator
         self._version: int | None = None
 
+    @property
+    def id(self) -> str:
+        return self._id
+
+    @property
+    def version(self) -> int | None:
+        return self._version
+
+    @property
+    def pending_events(self) -> list[BaseModel]:
+        return self._pending_events.copy()
+
+    @property
+    def event_discriminator(self) -> str | None:
+        return self._event_discriminator
+
     def _add_mutator(self, event_type: type[E], mutator: Callable[[E], None]) -> None:
         self._mutators[event_type] = mutator
-
-    def load_state(self, state: JsonValue) -> None:
-        self._state = self._state_class.model_validate(state)
 
     def apply(self, event: BaseModel) -> None:
         """Route the event to the registered mutator."""
@@ -39,24 +52,30 @@ class Aggregate(Generic[S]):
             raise ValueError(f"No mutator registered for event type {event_type}.")
         mutator_func = self._mutators[event_type]
         mutator_func(event)
-
-    def deserialize_event(self, event_json: str) -> BaseModel:
-        """Deserialize a JSON string into a typed event."""
-        if self._event_discriminator is not None:
-            event_types = tuple(self._mutators.keys())
-            union_type = Union[event_types]
-            adapter = TypeAdapter(
-                Annotated[union_type, Discriminator(self._event_discriminator)]
-            )
-            return adapter.validate_json(event_json)
-
-        for event_type in self._mutators:
-            try:
-                return TypeAdapter(event_type).validate_json(event_json)
-            except Exception:
-                continue
-        raise ValueError("No matching event type found for the provided JSON.")
+        self._version = (self._version or 0) + 1
 
     def _publish(self, event: BaseModel) -> None:
         self._pending_events.append(event)
         self.apply(event)
+
+    def get_state(self) -> BaseModel | None:
+        if self._state is None:
+            return None
+        return self._state.model_copy()
+
+    def load_state(self, value: BaseModel, version: int) -> None:
+        if not isinstance(value, self._state_class):
+            raise ValueError(
+                f"Invalid state type: expected {self._state_class}, got {type(value)}"
+            )
+        self._state = value
+        self._version = version
+        self._pending_events.clear()
+
+    @property
+    def event_types(self) -> tuple[type[BaseModel], ...]:
+        return tuple(self._mutators.keys())
+
+    @property
+    def state_type(self) -> type[BaseModel]:
+        return self._state_class
