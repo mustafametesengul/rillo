@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import Annotated, Generic, TypeVar, Union
 
-from pydantic import BaseModel, Discriminator, JsonValue, TypeAdapter
+from pydantic import BaseModel, Discriminator, TypeAdapter
 
 from rillo.aggregate import Aggregate
-from rillo.snapshot import SnapshotStore
+from rillo.snapshot_store import SnapshotStore
 
 A = TypeVar("A", bound=Aggregate)
 
@@ -13,21 +13,14 @@ class OptimisticConcurrencyError(Exception):
     pass
 
 
-class EventBatch(BaseModel):
-    events: list[JsonValue]
-
-
 class Repository(Generic[A], ABC):
     def __init__(
         self,
         event_discriminator: str | None = None,
-        snapshot_store: SnapshotStore | None = None,
+        snapshot_store: SnapshotStore[A] | None = None,
     ) -> None:
         self._event_discriminator = event_discriminator
         self._snapshot_store = snapshot_store
-
-    def _deserialize_state(self, aggregate: A, state: str) -> BaseModel:
-        return aggregate._state_class.model_validate_json(state)
 
     def _deserialize_event(self, aggregate: A, event: str) -> BaseModel:
         """Deserialize a JSON string into a typed event."""
@@ -70,28 +63,11 @@ class Repository(Generic[A], ABC):
         if self._snapshot_store is None:
             return
 
-        state = aggregate.get_state()
-        if state is None:
-            return
-
-        version = aggregate.version
-
-        if version is not None and version % 10 == 0:
-            snapshot = (state, version)
-            await self._snapshot_store.save(aggregate.id, snapshot)
+        await self._snapshot_store.save(aggregate)
 
     async def load(self, aggregate: A) -> None:
-        if self._snapshot_store is None:
-            snapshot = None
-        else:
-            try:
-                snapshot = await self._snapshot_store.load(aggregate.id)
-            except Exception:
-                snapshot = None
-
-        if snapshot is not None:
-            state, version = snapshot
-            aggregate.load_state(state, version)
+        if self._snapshot_store is not None:
+            await self._snapshot_store.load(aggregate)
 
         events = await self._load_events(aggregate.id, aggregate.version)
         for event in events:

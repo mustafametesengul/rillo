@@ -13,26 +13,41 @@ except ImportError as e:
 
 from rillo.aggregate import Aggregate
 from rillo.respository import Repository
-from rillo.snapshot import SnapshotStore
+from rillo.snapshot_store import SnapshotStore
 
 A = TypeVar("A", bound=Aggregate)
 
 
-class NATSSnapshotStore(SnapshotStore):
+class Snapshot(BaseModel):
+    state: str
+    version: int
+
+
+class NATSSnapshotStore(SnapshotStore[A]):
     def __init__(self, kv: KeyValue) -> None:
         self._kv = kv
 
     @override
-    async def load(self, aggregate_id: str) -> tuple[BaseModel, int] | None:
-        entry = await self._kv.get(aggregate_id)
+    async def load(self, aggregate: A) -> None:
+        entry = await self._kv.get(aggregate.id)
         value = entry.value
         if value is None:
             return None
-        # return value.decode("utf-8")
+        snapshot = Snapshot.model_validate_json(value.decode("utf-8"))
+        state = self._deserialize_state(aggregate, snapshot.state)
+        aggregate.load_state(state, version=snapshot.version)
 
     @override
-    async def save(self, aggregate_id: str, snapshot: tuple[BaseModel, int]) -> None:
-        pass
+    async def save(self, aggregate: A) -> None:
+        state = aggregate.get_state()
+        version = aggregate.version
+        if state is None or version is None:
+            raise ValueError("Aggregate state or version is None.")
+        snapshot = Snapshot(
+            state=state.model_dump_json(),
+            version=version,
+        )
+        await self._kv.put(aggregate.id, snapshot.model_dump_json().encode("utf-8"))
 
 
 class NATSRepository(Repository[A]):
@@ -41,7 +56,7 @@ class NATSRepository(Repository[A]):
         js: JetStreamContext,
         subject_prefix: str,
         event_discriminator: str | None = None,
-        snapshot_store: SnapshotStore | None = None,
+        snapshot_store: SnapshotStore[A] | None = None,
     ) -> None:
         self._js = js
         self._subject_prefix = subject_prefix
@@ -52,14 +67,14 @@ class NATSRepository(Repository[A]):
 
     @override
     async def _save_events(
-        self, aggregate_id: str, events: list[bytes], expected_version: int | None
+        self, aggregate_id: str, events: list[BaseModel], expected_version: int | None
     ) -> None:
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
         for event in events:
             await self._js.publish(
                 subject,
-                event,
+                event.model_dump_json().encode("utf-8"),
             )
 
     @override
@@ -67,7 +82,7 @@ class NATSRepository(Repository[A]):
         self,
         aggregate_id: str,
         from_version: int | None,
-    ) -> list[bytes]:
+    ) -> list[BaseModel]:
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
         events = []
@@ -77,7 +92,7 @@ class NATSRepository(Repository[A]):
             sub = await self._js.subscribe(subject)
             while True:
                 msg = await sub.next_msg(timeout=0.1)
-                events.append(msg.data)
+                events.append(self._deserialize_event(A, msg.data.decode("utf-8")))
         except NatsTimeoutError:
             pass
         finally:
