@@ -15,24 +15,29 @@ A = TypeVar("A", bound=Aggregate)
 
 
 class Repository(Generic[A], ABC):
-    def __init__(self, snapshot_store: SnapshotStore | None = None) -> None:
+    def __init__(
+        self,
+        event_discriminator: str | None = None,
+        snapshot_store: SnapshotStore | None = None,
+    ) -> None:
+        self._event_discriminator = event_discriminator
         self._snapshot_store = snapshot_store
 
-    def _deserialize_state(self, aggregate: A, state: JsonValue) -> BaseModel:
-        return aggregate._state_class.model_validate(state)
+    def _deserialize_state(self, aggregate: A, state: str) -> BaseModel:
+        return aggregate._state_class.model_validate_json(state)
 
-    def _deserialize_event(self, aggregate: A, event: JsonValue) -> BaseModel:
+    def _deserialize_event(self, aggregate: A, event: str) -> BaseModel:
         """Deserialize a JSON string into a typed event."""
-        if aggregate._event_discriminator is not None:
+        if self._event_discriminator is not None:
             union_type = Union[aggregate.event_types]
             adapter = TypeAdapter(
-                Annotated[union_type, Discriminator(aggregate._event_discriminator)]
+                Annotated[union_type, Discriminator(self._event_discriminator)]
             )
-            return adapter.validate_python(event)
+            return adapter.validate_json(event)
 
         for event_type in aggregate.event_types:
             try:
-                return TypeAdapter(event_type).validate_python(event)
+                return TypeAdapter(event_type).validate_json(event)
             except Exception:
                 continue
         raise ValueError("No matching event type found for the provided JSON.")
@@ -88,5 +93,5 @@ class Repository(Generic[A], ABC):
                 pass
         events = await self._load_events(aggregate._id, aggregate._version)
         for event_bytes in events:
-            event = self._deserialize_event(aggregate, event_bytes)
+            event = self._deserialize_event(aggregate, event_bytes.decode("utf-8"))
             aggregate.apply(event)

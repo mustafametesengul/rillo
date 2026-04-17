@@ -16,14 +16,12 @@ class Aggregate(Generic[S]):
         self,
         id: str,
         state_class: type[S],
-        event_discriminator: str | None = None,
     ) -> None:
         self._id: str = id
         self._state_class: type[S] = state_class
         self._state: S | None = None
         self._pending_events: list[BaseModel] = []
         self._mutators: dict[type[BaseModel], Callable[[Any], None]] = {}
-        self._event_discriminator: str | None = event_discriminator
         self._version: int | None = None
 
     @property
@@ -37,10 +35,6 @@ class Aggregate(Generic[S]):
     @property
     def pending_events(self) -> list[BaseModel]:
         return self._pending_events.copy()
-
-    @property
-    def event_discriminator(self) -> str | None:
-        return self._event_discriminator
 
     def _add_mutator(self, event_type: type[E], mutator: Callable[[E], None]) -> None:
         self._mutators[event_type] = mutator

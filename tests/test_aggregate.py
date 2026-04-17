@@ -28,8 +28,8 @@ class UserState(BaseModel):
 
 
 class User(Aggregate[UserState]):
-    def __init__(self, id: UUID | None = None) -> None:
-        super().__init__(str(id or uuid4()), UserState, "schema_version")
+    def __init__(self, id: UUID) -> None:
+        super().__init__(str(id), UserState)
         self._add_mutator(UserSignedUp, self.apply_user_signed_up)
         self._add_mutator(AccountDeleted, self.apply_account_deleted)
 
@@ -62,8 +62,12 @@ class User(Aggregate[UserState]):
 
 
 class UserRepository(NATSRepository[User]):
-    def __init__(self, js: JetStreamContext) -> None:
-        super().__init__(js, subject_prefix="user")
+    def __init__(self, js: JetStreamContext, subject: str) -> None:
+        super().__init__(
+            js,
+            subject_prefix=subject,
+            event_discriminator="schema_version",
+        )
 
 
 async def test_user_repository() -> None:
@@ -71,11 +75,10 @@ async def test_user_repository() -> None:
     port = 4222
     nc = await nats.connect(f"nats://{host}:{port}")
     js = nc.jetstream()
+    await js.add_stream(name="test", subjects=["user.*"])
+    user_repository = UserRepository(js, subject="user")
 
-    user_repository = UserRepository(js)
-    await user_repository.register("test")
-
-    user = User()
+    user = User(uuid4())
     user.sign_up_with_username("testuser", "hashedpassword")
     await user_repository.save(user)
 

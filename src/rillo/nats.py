@@ -38,14 +38,15 @@ class NATSRepository(Repository[A]):
         self,
         js: JetStreamContext,
         subject_prefix: str,
+        event_discriminator: str | None = None,
         snapshot_store: SnapshotStore | None = None,
     ) -> None:
         self._js = js
         self._subject_prefix = subject_prefix
-        super().__init__(snapshot_store=snapshot_store)
-
-    async def register(self, name: str) -> None:
-        await self._js.add_stream(name=name, subjects=[f"{self._subject_prefix}.*"])
+        super().__init__(
+            event_discriminator=event_discriminator,
+            snapshot_store=snapshot_store,
+        )
 
     @override
     async def _save_events(
