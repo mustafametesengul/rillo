@@ -2,11 +2,6 @@ from typing import Any, Callable, Generic, TypeVar
 
 from pydantic import BaseModel
 
-
-class OptimisticConcurrencyError(Exception):
-    pass
-
-
 S = TypeVar("S", bound=BaseModel)
 E = TypeVar("E", bound=BaseModel)
 

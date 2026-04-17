@@ -1,15 +1,13 @@
 from abc import ABC, abstractmethod
-from pydantic import BaseModel, JsonValue
 
-
-class Snapshot(BaseModel):
-    state: JsonValue
-    version: int
+from pydantic import BaseModel
 
 
 class SnapshotStore(ABC):
     @abstractmethod
-    async def load(self, aggregate_id: str) -> Snapshot | None: ...
+    async def load(self, aggregate_id: str) -> tuple[BaseModel, int] | None: ...
 
     @abstractmethod
-    async def save(self, aggregate_id: str, snapshot: Snapshot) -> None: ...
+    async def save(
+        self, aggregate_id: str, snapshot: tuple[BaseModel, int]
+    ) -> None: ...

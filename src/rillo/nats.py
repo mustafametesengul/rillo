@@ -1,5 +1,7 @@
 from typing import TypeVar, override
 
+from pydantic import BaseModel
+
 try:
     from nats.errors import TimeoutError as NatsTimeoutError
     from nats.js.client import JetStreamContext
@@ -11,7 +13,7 @@ except ImportError as e:
 
 from rillo.aggregate import Aggregate
 from rillo.respository import Repository
-from rillo.snapshot import Snapshot, SnapshotStore
+from rillo.snapshot import SnapshotStore
 
 A = TypeVar("A", bound=Aggregate)
 
@@ -21,7 +23,7 @@ class NATSSnapshotStore(SnapshotStore):
         self._kv = kv
 
     @override
-    async def load(self, aggregate_id: str) -> Snapshot | None:
+    async def load(self, aggregate_id: str) -> tuple[BaseModel, int] | None:
         entry = await self._kv.get(aggregate_id)
         value = entry.value
         if value is None:
@@ -29,7 +31,7 @@ class NATSSnapshotStore(SnapshotStore):
         # return value.decode("utf-8")
 
     @override
-    async def save(self, aggregate_id: str, snapshot: Snapshot) -> None:
+    async def save(self, aggregate_id: str, snapshot: tuple[BaseModel, int]) -> None:
         pass
 
 
