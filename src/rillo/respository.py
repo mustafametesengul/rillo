@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Annotated, Generic, TypeVar, Union
+from typing import Annotated, Generic, Sequence, TypeVar, Union
 
-from pydantic import BaseModel, Discriminator, TypeAdapter
+from pydantic import BaseModel, Discriminator, JsonValue, TypeAdapter
 
 from rillo.aggregate import Aggregate
 from rillo.snapshot_store import SnapshotStore
@@ -22,18 +22,18 @@ class Repository(Generic[A], ABC):
         self._event_discriminator = event_discriminator
         self._snapshot_store = snapshot_store
 
-    def _deserialize_event(self, aggregate: A, event: str) -> BaseModel:
+    def _deserialize_event(self, aggregate: A, event: JsonValue) -> BaseModel:
         """Deserialize a JSON string into a typed event."""
         if self._event_discriminator is not None:
             union_type = Union[aggregate.event_types]
             adapter = TypeAdapter(
                 Annotated[union_type, Discriminator(self._event_discriminator)]
             )
-            return adapter.validate_json(event)
+            return adapter.validate_python(event)
 
         for event_type in aggregate.event_types:
             try:
-                return TypeAdapter(event_type).validate_json(event)
+                return TypeAdapter(event_type).validate_python(event)
             except Exception:
                 continue
         raise ValueError("No matching event type found for the provided JSON.")
@@ -42,7 +42,7 @@ class Repository(Generic[A], ABC):
     async def _save_events(
         self,
         aggregate_id: str,
-        events: list[BaseModel],
+        events: Sequence[JsonValue],
         expected_version: int | None,
     ) -> None: ...
 
@@ -51,14 +51,16 @@ class Repository(Generic[A], ABC):
         self,
         aggregate_id: str,
         from_version: int | None,
-    ) -> list[BaseModel]: ...
+    ) -> Sequence[JsonValue]: ...
 
     async def save(self, aggregate: A) -> None:
         events = aggregate.pending_events
         if len(events) == 0:
             return
 
-        await self._save_events(aggregate.id, events, aggregate.version)
+        json_events = [event.model_dump(mode="json") for event in events]
+
+        await self._save_events(aggregate.id, json_events, aggregate.version)
 
         if self._snapshot_store is None:
             return
@@ -71,4 +73,5 @@ class Repository(Generic[A], ABC):
 
         events = await self._load_events(aggregate.id, aggregate.version)
         for event in events:
-            aggregate.apply(event)
+            event_model = self._deserialize_event(aggregate, event)
+            aggregate.apply(event_model)
