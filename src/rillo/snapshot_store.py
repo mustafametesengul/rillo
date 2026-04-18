@@ -17,7 +17,10 @@ class SnapshotStore(Generic[A], ABC):
 
     @abstractmethod
     async def _save_state(
-        self, aggregate_id: str, state: JsonValue, version: int
+        self,
+        aggregate_id: str,
+        state: JsonValue,
+        version: int,
     ) -> None: ...
 
     async def load(self, aggregate: A) -> None:

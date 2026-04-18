@@ -14,7 +14,7 @@ except ImportError as e:
 import json
 
 from rillo.aggregate import Aggregate
-from rillo.respository import Repository
+from rillo.repository import Repository
 from rillo.snapshot_store import SnapshotStore
 
 A = TypeVar("A", bound=Aggregate)

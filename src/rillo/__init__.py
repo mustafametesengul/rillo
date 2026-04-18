@@ -1,4 +1,4 @@
 from rillo.aggregate import Aggregate
-from rillo.respository import Repository
+from rillo.repository import Repository
 
 __all__ = ["Aggregate", "Repository"]
