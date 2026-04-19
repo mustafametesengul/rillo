@@ -4,6 +4,7 @@ from pydantic import BaseModel, JsonValue
 
 try:
     from nats.errors import TimeoutError as NatsTimeoutError
+    from nats.js.api import ConsumerConfig, DeliverPolicy
     from nats.js.client import JetStreamContext
     from nats.js.kv import KeyValue
 except ImportError as e:
@@ -11,7 +12,6 @@ except ImportError as e:
         "nats-py is required to use NATSRepository. Install it with: uv add rillo[nats]"
     ) from e
 
-import json
 
 from rillo.aggregate import Aggregate
 from rillo.repository import OptimisticConcurrencyError, Repository
@@ -23,6 +23,10 @@ A = TypeVar("A", bound=Aggregate)
 class Snapshot(BaseModel):
     state: JsonValue
     version: int
+
+
+class EventBatch(BaseModel):
+    events: Sequence[JsonValue]
 
 
 class NATSSnapshotStore(SnapshotStore[A]):
@@ -40,7 +44,10 @@ class NATSSnapshotStore(SnapshotStore[A]):
 
     @override
     async def _save_state(
-        self, aggregate_id: str, state: JsonValue, version: int
+        self,
+        aggregate_id: str,
+        state: JsonValue,
+        version: int,
     ) -> None:
         snapshot = Snapshot(
             state=state,
@@ -54,15 +61,11 @@ class NATSRepository(Repository[A]):
         self,
         js: JetStreamContext,
         subject_prefix: str,
-        schema_discriminator: str,
         snapshot_store: SnapshotStore[A] | None = None,
     ) -> None:
         self._js = js
         self._subject_prefix = subject_prefix
-        super().__init__(
-            schema_discriminator=schema_discriminator,
-            snapshot_store=snapshot_store,
-        )
+        super().__init__(snapshot_store=snapshot_store)
 
     @override
     async def _save_events(
@@ -73,48 +76,50 @@ class NATSRepository(Repository[A]):
     ) -> None:
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
-        for i, event in enumerate(events):
-            headers = None
-            if expected_version is not None:
-                headers = {
-                    "Nats-Expected-Last-Subject-Sequence": str(expected_version + i)
-                }
-            try:
-                await self._js.publish(
-                    subject,
-                    json.dumps(event).encode("utf-8"),
-                    headers=headers,
-                )
-            except Exception as e:
-                if "wrong last sequence" in str(e).lower():
-                    raise OptimisticConcurrencyError(
-                        f"Concurrency conflict for aggregate {aggregate_id}"
-                    ) from e
-                raise
+        event_batch = EventBatch(events=events)
+
+        headers = {"Nats-Expected-Last-Subject-Sequence": str(expected_version)}
+        try:
+            await self._js.publish(
+                subject,
+                event_batch.model_dump_json().encode("utf-8"),
+                headers=headers,
+            )
+        except Exception as e:
+            if "wrong last sequence" in str(e).lower():
+                raise OptimisticConcurrencyError(
+                    f"Concurrency conflict for aggregate {aggregate_id}"
+                ) from e
+            raise
 
     @override
     async def _load_events(
         self,
         aggregate_id: str,
         from_version: int,
-    ) -> Sequence[JsonValue]:
+    ) -> tuple[Sequence[JsonValue], int]:
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
-        events = []
-        events_to_skip = from_version or 0
-        sub: JetStreamContext.PushSubscription | None = None
+        all_events: list[JsonValue] = []
+        version = from_version
+
+        sub = await self._js.subscribe(
+            subject,
+            ordered_consumer=True,
+            config=ConsumerConfig(
+                deliver_policy=DeliverPolicy.BY_START_SEQUENCE,
+                opt_start_seq=from_version + 1,
+            ),
+        )
         try:
-            sub = await self._js.subscribe(subject, ordered_consumer=True)
             while True:
-                msg = await sub.next_msg(timeout=0.1)
-                if events_to_skip > 0:
-                    events_to_skip -= 1
-                    continue
-                events.append(json.loads(msg.data.decode("utf-8")))
+                msg = await sub.next_msg(timeout=1.0)
+                batch = EventBatch.model_validate_json(msg.data.decode("utf-8"))
+                all_events.extend(batch.events)
+                version += 1
         except NatsTimeoutError:
             pass
         finally:
-            if sub is not None:
-                await sub.unsubscribe()
+            await sub.unsubscribe()
 
-        return events
+        return all_events, version

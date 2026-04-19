@@ -47,7 +47,6 @@ class Aggregate(Generic[S]):
             raise ValueError(f"No mutator registered for event type {event_type}.")
         mutator_func = self._mutators[event_type]
         mutator_func(event)
-        self._version += 1
 
     def _publish(self, event: BaseModel) -> None:
         self._apply(event)
@@ -60,6 +59,10 @@ class Aggregate(Generic[S]):
     @property
     def version(self) -> int:
         return self._version
+
+    @version.setter
+    def version(self, value: int) -> None:
+        self._version = value
 
     @property
     def pending_events(self) -> list[JsonValue]:
@@ -79,3 +82,7 @@ class Aggregate(Generic[S]):
         self._state = value
         self._version = version
         self._pending_events.clear()
+
+    def mark_events_as_committed(self) -> None:
+        self._pending_events.clear()
+        self._version += 1

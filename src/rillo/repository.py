@@ -33,19 +33,20 @@ class Repository(Generic[A], ABC):
         self,
         aggregate_id: str,
         from_version: int,
-    ) -> Sequence[JsonValue]: ...
+    ) -> tuple[Sequence[JsonValue], int]: ...
 
     async def save(self, aggregate: A) -> None:
         events = aggregate.pending_events
         if len(events) == 0:
             return
-        expected_version = aggregate.version - len(events)
-        await self._save_events(aggregate.id, events, expected_version)
+        await self._save_events(aggregate.id, events, aggregate.version)
+        aggregate.mark_events_as_committed()
 
     async def load(self, aggregate: A) -> None:
         if self._snapshot_store is not None:
             await self._snapshot_store.load(aggregate)
 
-        events = await self._load_events(aggregate.id, aggregate.version)
+        events, version = await self._load_events(aggregate.id, aggregate.version)
         for event in events:
             aggregate.apply(event)
+        aggregate.version = version
