@@ -1,4 +1,4 @@
-from typing import Annotated, Any, Callable, Generic, TypeVar, Union
+from typing import Annotated, Any, Callable, Generic, Sequence, TypeVar, Union
 
 from pydantic import BaseModel, Discriminator, JsonValue, TypeAdapter
 
@@ -60,17 +60,15 @@ class Aggregate(Generic[S]):
     def version(self) -> int:
         return self._version
 
-    @version.setter
-    def version(self, value: int) -> None:
-        self._version = value
-
     @property
     def pending_events(self) -> list[JsonValue]:
         return [event.model_dump(mode="json") for event in self._pending_events]
 
-    def apply(self, event: JsonValue) -> None:
-        parsed_event = self._parse_event(event)
-        self._apply(parsed_event)
+    def apply(self, events: Sequence[JsonValue]) -> None:
+        for event in events:
+            parsed_event = self._parse_event(event)
+            self._apply(parsed_event)
+        self._version += 1
 
     def get_state(self) -> JsonValue | None:
         if self._state is None:
