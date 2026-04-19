@@ -22,7 +22,7 @@ A = TypeVar("A", bound=Aggregate)
 
 class Snapshot(BaseModel):
     state: JsonValue
-    version: int
+    version: str
 
 
 class EventBatch(BaseModel):
@@ -34,7 +34,7 @@ class NATSSnapshotStore(SnapshotStore[A]):
         self._kv = kv
 
     @override
-    async def _load_state(self, aggregate_id: str) -> tuple[JsonValue, int] | None:
+    async def _load_state(self, aggregate_id: str) -> tuple[JsonValue, str] | None:
         entry = await self._kv.get(aggregate_id)
         value = entry.value
         if value is None:
@@ -47,7 +47,7 @@ class NATSSnapshotStore(SnapshotStore[A]):
         self,
         aggregate_id: str,
         state: JsonValue,
-        version: int,
+        version: str,
     ) -> None:
         snapshot = Snapshot(
             state=state,
@@ -72,19 +72,20 @@ class NATSRepository(Repository[A]):
         self,
         aggregate_id: str,
         events: Sequence[JsonValue],
-        expected_version: int,
-    ) -> None:
+        expected_version: str | None,
+    ) -> str:
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
         event_batch = EventBatch(events=events)
 
         headers = {"Nats-Expected-Last-Subject-Sequence": str(expected_version)}
         try:
-            await self._js.publish(
+            result = await self._js.publish(
                 subject,
                 event_batch.model_dump_json().encode("utf-8"),
                 headers=headers,
             )
+            return str(result.seq)
         except Exception as e:
             if "wrong last sequence" in str(e).lower():
                 raise OptimisticConcurrencyError(
@@ -96,29 +97,36 @@ class NATSRepository(Repository[A]):
     async def _load_events(
         self,
         aggregate_id: str,
-        from_version: int,
-    ) -> tuple[Sequence[JsonValue], int]:
+        from_version: str | None,
+    ) -> tuple[Sequence[JsonValue], str]:
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
-        all_events: list[JsonValue] = []
-        version = from_version
-
-        sub = await self._js.subscribe(
-            subject,
-            ordered_consumer=True,
-            config=ConsumerConfig(
+        if from_version is not None:
+            config = ConsumerConfig(
                 deliver_policy=DeliverPolicy.BY_START_SEQUENCE,
-                opt_start_seq=from_version + 1,
-            ),
-        )
+                opt_start_seq=int(from_version) + 1,
+            )
+        else:
+            config = ConsumerConfig(
+                deliver_policy=DeliverPolicy.ALL,
+            )
+
+        sub = await self._js.subscribe(subject, config=config)
+
+        all_events: list[JsonValue] = []
+        version = from_version or "0"
+
         try:
             while True:
-                msg = await sub.next_msg(timeout=1.0)
-                batch = EventBatch.model_validate_json(msg.data.decode("utf-8"))
-                all_events.extend(batch.events)
-                version += 1
-        except NatsTimeoutError:
-            pass
+                try:
+                    msg = await sub.next_msg(timeout=1)
+                    event_batch = EventBatch.model_validate_json(
+                        msg.data.decode("utf-8")
+                    )
+                    all_events.extend(event_batch.events)
+                    version = str(msg.metadata.sequence.stream)
+                except NatsTimeoutError:
+                    break
         finally:
             await sub.unsubscribe()
 

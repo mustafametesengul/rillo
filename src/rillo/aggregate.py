@@ -19,7 +19,7 @@ class Aggregate(Generic[S]):
         self._pending_events: list[BaseModel] = []
         self._schema_discriminator: str = schema_discriminator
         self._mutators: dict[type[BaseModel], Callable[[Any], None]] = {}
-        self._version: int = 0
+        self._version: str | None = None
 
     def _add_mutator(
         self,
@@ -57,30 +57,30 @@ class Aggregate(Generic[S]):
         return self._id
 
     @property
-    def version(self) -> int:
+    def version(self) -> str | None:
         return self._version
 
     @property
     def pending_events(self) -> list[JsonValue]:
         return [event.model_dump(mode="json") for event in self._pending_events]
 
-    def apply(self, events: Sequence[JsonValue]) -> None:
+    def apply(self, events: Sequence[JsonValue], version: str) -> None:
         for event in events:
             parsed_event = self._parse_event(event)
             self._apply(parsed_event)
-        self._version += 1
+        self._version = version
 
     def get_state(self) -> JsonValue | None:
         if self._state is None:
             return None
         return self._state.model_dump(mode="json")
 
-    def load_state(self, state: JsonValue, version: int) -> None:
+    def load_state(self, state: JsonValue, version: str) -> None:
         value = self._parse_state(state)
         self._state = value
         self._version = version
         self._pending_events.clear()
 
-    def mark_events_as_committed(self) -> None:
+    def mark_events_as_committed(self, version: str) -> None:
         self._pending_events.clear()
-        self._version += 1
+        self._version = version
