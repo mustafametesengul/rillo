@@ -10,14 +10,14 @@ A = TypeVar("A", bound=Aggregate)
 
 class SnapshotStore(Generic[A], ABC):
     @abstractmethod
-    async def _load_state(self, aggregate_id: str) -> tuple[JsonValue, str] | None: ...
+    async def _load_state(self, aggregate_id: str) -> tuple[JsonValue, int] | None: ...
 
     @abstractmethod
     async def _save_state(
         self,
         aggregate_id: str,
         state: JsonValue,
-        version: str,
+        version: int,
     ) -> None: ...
 
     async def load(self, aggregate: A) -> None:
@@ -30,5 +30,5 @@ class SnapshotStore(Generic[A], ABC):
     async def save(self, aggregate: A) -> None:
         state = aggregate.get_state()
         version = aggregate.version
-        if state is not None and version is not None:
+        if state is not None and version != 0:
             await self._save_state(aggregate.id, state, version)

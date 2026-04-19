@@ -23,42 +23,40 @@ class InMemoryRepository(Repository[User]):
         self,
         aggregate_id: str,
         events: Sequence[JsonValue],
-        expected_version: str | None,
-    ) -> str:
+        expected_version: int,
+    ) -> int:
         current_seq = self._seq.get(aggregate_id, 0)
-        expected = int(expected_version) if expected_version else 0
-        if expected != current_seq:
+        if expected_version != current_seq:
             raise OptimisticConcurrencyError(
-                f"Expected version {expected}, but current is {current_seq}"
+                f"Expected version {expected_version}, but current is {current_seq}"
             )
         if aggregate_id not in self._streams:
             self._streams[aggregate_id] = []
         self._streams[aggregate_id].extend(events)
         self._seq[aggregate_id] = current_seq + len(events)
-        return str(self._seq[aggregate_id])
+        return self._seq[aggregate_id]
 
     async def _load_events(
         self,
         aggregate_id: str,
-        from_version: str | None,
-    ) -> tuple[Sequence[JsonValue], str]:
+        from_version: int,
+    ) -> tuple[Sequence[JsonValue], int]:
         events = self._streams.get(aggregate_id, [])
-        start = int(from_version) if from_version else 0
-        return events[start:], str(len(events))
+        return events[from_version:], len(events)
 
 
 class InMemorySnapshotStore(SnapshotStore[User]):
     def __init__(self) -> None:
-        self._snapshots: dict[str, tuple[JsonValue, str]] = {}
+        self._snapshots: dict[str, tuple[JsonValue, int]] = {}
 
-    async def _load_state(self, aggregate_id: str) -> tuple[JsonValue, str] | None:
+    async def _load_state(self, aggregate_id: str) -> tuple[JsonValue, int] | None:
         return self._snapshots.get(aggregate_id)
 
     async def _save_state(
         self,
         aggregate_id: str,
         state: JsonValue,
-        version: str,
+        version: int,
     ) -> None:
         self._snapshots[aggregate_id] = (state, version)
 
@@ -97,7 +95,7 @@ class TestRepositorySave:
     ) -> None:
         user.sign_up("alice", "hash123")
         await repo.save(user)
-        assert user.version == "1"
+        assert user.version == 1
 
     @pytest.mark.asyncio
     async def test_save_no_events_is_noop(
@@ -114,7 +112,7 @@ class TestRepositorySave:
         user.delete_account()
         await repo.save(user)
         assert len(repo._streams["user-1"]) == 2
-        assert user.version == "2"
+        assert user.version == 2
 
 
 class TestRepositoryLoad:
@@ -129,14 +127,14 @@ class TestRepositoryLoad:
         state = loaded_user.get_state()
         assert isinstance(state, dict)
         assert state["username"] == "alice"
-        assert loaded_user.version == "1"
+        assert loaded_user.version == 1
 
     @pytest.mark.asyncio
     async def test_load_empty_aggregate(self, repo: InMemoryRepository) -> None:
         user = User("nonexistent")
         await repo.load(user)
         assert user.get_state() is None
-        assert user.version == "0"
+        assert user.version == 0
 
 
 class TestOptimisticConcurrency:

@@ -76,7 +76,7 @@ class TestNATSRepositorySave:
         user.sign_up("alice", "hash123")
         await repo.save(user)
         assert user.version is not None
-        assert int(user.version) > 0
+        assert user.version > 0
 
     @pytest.mark.asyncio
     async def test_save_multiple_events(self, repo: NATSRepository[User]) -> None:
@@ -95,7 +95,7 @@ class TestNATSRepositorySave:
     async def test_save_no_events_is_noop(self, repo: NATSRepository[User]) -> None:
         user = User("user-1")
         await repo.save(user)
-        assert user.version is None
+        assert user.version == 0
 
 
 class TestNATSRepositoryLoad:
@@ -104,7 +104,7 @@ class TestNATSRepositoryLoad:
         user = User("nonexistent")
         await repo.load(user)
         assert user.get_state() is None
-        assert user.version == "0"
+        assert user.version == 0
 
     @pytest.mark.asyncio
     async def test_load_multiple_saves(self, repo: NATSRepository[User]) -> None:
@@ -151,7 +151,7 @@ class TestNATSSnapshotStore:
     ) -> None:
         user = User("user-1")
         user.sign_up("alice", "hash123")
-        user.mark_events_as_committed("1")
+        user.mark_events_as_committed(1)
 
         await snapshot_store.save(user)
 
@@ -160,7 +160,7 @@ class TestNATSSnapshotStore:
         state = loaded.get_state()
         assert isinstance(state, dict)
         assert state["username"] == "alice"
-        assert loaded.version == "1"
+        assert loaded.version == 1
 
     @pytest.mark.asyncio
     async def test_load_nonexistent_is_noop(
@@ -169,7 +169,7 @@ class TestNATSSnapshotStore:
         user = User("no-such-user")
         await snapshot_store.load(user)
         assert user.get_state() is None
-        assert user.version is None
+        assert user.version == 0
 
 
 class TestNATSRepositoryWithSnapshots:

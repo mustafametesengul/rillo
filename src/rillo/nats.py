@@ -30,7 +30,7 @@ def _validate_aggregate_id(aggregate_id: str) -> None:
 
 class Snapshot(BaseModel):
     state: JsonValue
-    version: str
+    version: int
 
 
 class EventBatch(BaseModel):
@@ -42,7 +42,7 @@ class NATSSnapshotStore(SnapshotStore[A]):
         self._kv = kv
 
     @override
-    async def _load_state(self, aggregate_id: str) -> tuple[JsonValue, str] | None:
+    async def _load_state(self, aggregate_id: str) -> tuple[JsonValue, int] | None:
         _validate_aggregate_id(aggregate_id)
         try:
             entry = await self._kv.get(aggregate_id)
@@ -59,7 +59,7 @@ class NATSSnapshotStore(SnapshotStore[A]):
         self,
         aggregate_id: str,
         state: JsonValue,
-        version: str,
+        version: int,
     ) -> None:
         _validate_aggregate_id(aggregate_id)
         snapshot = Snapshot(
@@ -87,22 +87,21 @@ class NATSRepository(Repository[A]):
         self,
         aggregate_id: str,
         events: Sequence[JsonValue],
-        expected_version: str | None,
-    ) -> str:
+        expected_version: int,
+    ) -> int:
         _validate_aggregate_id(aggregate_id)
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
         event_batch = EventBatch(events=events)
 
-        expected_version = expected_version or "0"
-        headers = {"Nats-Expected-Last-Subject-Sequence": expected_version}
+        headers = {"Nats-Expected-Last-Subject-Sequence": str(expected_version)}
         try:
             result = await self._js.publish(
                 subject,
                 event_batch.model_dump_json().encode("utf-8"),
                 headers=headers,
             )
-            return str(result.seq)
+            return result.seq
         except Exception as e:
             if "wrong last sequence" in str(e).lower():
                 raise OptimisticConcurrencyError(
@@ -114,14 +113,14 @@ class NATSRepository(Repository[A]):
     async def _load_events(
         self,
         aggregate_id: str,
-        from_version: str | None,
-    ) -> tuple[Sequence[JsonValue], str]:
+        from_version: int,
+    ) -> tuple[Sequence[JsonValue], int]:
         _validate_aggregate_id(aggregate_id)
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
-        seq = int(from_version) + 1 if from_version is not None else 1
+        seq = from_version + 1
         all_events: list[JsonValue] = []
-        version = from_version or "0"
+        version = from_version
 
         while True:
             try:
@@ -135,7 +134,7 @@ class NATSRepository(Repository[A]):
                     break
                 event_batch = EventBatch.model_validate_json(msg.data.decode("utf-8"))
                 all_events.extend(event_batch.events)
-                version = str(msg.seq)
+                version = msg.seq
                 seq = msg.seq + 1
             except NotFoundError:
                 break

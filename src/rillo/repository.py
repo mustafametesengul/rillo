@@ -25,15 +25,15 @@ class Repository(Generic[A], ABC):
         self,
         aggregate_id: str,
         events: Sequence[JsonValue],
-        expected_version: str | None,
-    ) -> str: ...
+        expected_version: int,
+    ) -> int: ...
 
     @abstractmethod
     async def _load_events(
         self,
         aggregate_id: str,
-        from_version: str | None,
-    ) -> tuple[Sequence[JsonValue], str]: ...
+        from_version: int,
+    ) -> tuple[Sequence[JsonValue], int]: ...
 
     async def save(self, aggregate: A) -> None:
         events = aggregate.pending_events

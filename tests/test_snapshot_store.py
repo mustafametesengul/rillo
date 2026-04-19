@@ -9,7 +9,7 @@ class TestSnapshotStore:
         store = InMemorySnapshotStore()
         user = User("user-1")
         user.sign_up("alice", "hash123")
-        user.mark_events_as_committed("1")
+        user.mark_events_as_committed(1)
 
         await store.save(user)
 
@@ -18,7 +18,7 @@ class TestSnapshotStore:
         state = loaded.get_state()
         assert isinstance(state, dict)
         assert state["username"] == "alice"
-        assert loaded.version == "1"
+        assert loaded.version == 1
 
     @pytest.mark.asyncio
     async def test_load_nonexistent_is_noop(self) -> None:
@@ -26,7 +26,7 @@ class TestSnapshotStore:
         user = User("no-such-user")
         await store.load(user)
         assert user.get_state() is None
-        assert user.version is None
+        assert user.version == 0
 
     @pytest.mark.asyncio
     async def test_save_without_state_is_noop(self) -> None:
@@ -41,11 +41,11 @@ class TestSnapshotStore:
 
         user = User("user-1")
         user.sign_up("alice", "hash123")
-        user.mark_events_as_committed("1")
+        user.mark_events_as_committed(1)
         await store.save(user)
 
         # Apply more events and re-snapshot
-        user.apply([{"schema_version": "AccountDeletedV1"}], "2")
+        user.apply([{"schema_version": "AccountDeletedV1"}], 2)
         await store.save(user)
 
         loaded = User("user-1")
@@ -53,4 +53,4 @@ class TestSnapshotStore:
         state = loaded.get_state()
         assert isinstance(state, dict)
         assert state["account_deleted"] is True
-        assert loaded.version == "2"
+        assert loaded.version == 2

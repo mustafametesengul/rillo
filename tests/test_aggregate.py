@@ -7,8 +7,8 @@ class TestAggregateInit:
     def test_id(self, user: User) -> None:
         assert user.id == "user-1"
 
-    def test_initial_version_is_none(self, user: User) -> None:
-        assert user.version is None
+    def test_initial_version_is_zero(self, user: User) -> None:
+        assert user.version == 0
 
     def test_initial_state_is_none(self, user: User) -> None:
         assert user.get_state() is None
@@ -61,11 +61,11 @@ class TestApplyFromJson:
                 "password_hash": "pw",
             },
         ]
-        user.apply(events, "1")
+        user.apply(events, 1)
         state = user.get_state()
         assert isinstance(state, dict)
         assert state["username"] == "bob"
-        assert user.version == "1"
+        assert user.version == 1
 
     def test_apply_multiple_events(self, user: User) -> None:
         events: list[JsonValue] = [
@@ -76,11 +76,11 @@ class TestApplyFromJson:
             },
             {"schema_version": "AccountDeletedV1"},
         ]
-        user.apply(events, "2")
+        user.apply(events, 2)
         state = user.get_state()
         assert isinstance(state, dict)
         assert state["account_deleted"] is True
-        assert user.version == "2"
+        assert user.version == 2
 
     def test_apply_does_not_add_pending_events(self, user: User) -> None:
         events: list[JsonValue] = [
@@ -90,7 +90,7 @@ class TestApplyFromJson:
                 "password_hash": "pw",
             },
         ]
-        user.apply(events, "1")
+        user.apply(events, 1)
         assert user.pending_events == []
 
 
@@ -102,9 +102,9 @@ class TestLoadState:
             "password_hash": "h",
             "account_deleted": False,
         }
-        user.load_state(state, "5")
+        user.load_state(state, 5)
         assert user.get_state() == state
-        assert user.version == "5"
+        assert user.version == 5
 
     def test_load_state_clears_pending_events(self, user: User) -> None:
         user.sign_up("alice", "hash123")
@@ -115,7 +115,7 @@ class TestLoadState:
             "password_hash": "h",
             "account_deleted": False,
         }
-        user.load_state(state, "5")
+        user.load_state(state, 5)
         assert user.pending_events == []
 
 
@@ -123,9 +123,9 @@ class TestMarkEventsAsCommitted:
     def test_clears_pending_and_sets_version(self, user: User) -> None:
         user.sign_up("alice", "hash123")
         assert len(user.pending_events) == 1
-        user.mark_events_as_committed("10")
+        user.mark_events_as_committed(10)
         assert user.pending_events == []
-        assert user.version == "10"
+        assert user.version == 10
 
 
 class TestDomainLogicErrors:
@@ -143,4 +143,4 @@ class TestDomainLogicErrors:
 class TestUnregisteredEvent:
     def test_apply_unregistered_event_raises(self, user: User) -> None:
         with pytest.raises(Exception):
-            user.apply([{"schema_version": "UnknownV1"}], "1")
+            user.apply([{"schema_version": "UnknownV1"}], 1)
