@@ -39,13 +39,8 @@ class Repository(Generic[A], ABC):
         events = aggregate.pending_events
         if len(events) == 0:
             return
-
-        await self._save_events(aggregate.id, events, aggregate.version)
-
-        if self._snapshot_store is None:
-            return
-
-        await self._snapshot_store.save(aggregate)
+        expected_version = aggregate.version - len(events)
+        await self._save_events(aggregate.id, events, expected_version)
 
     async def load(self, aggregate: A) -> None:
         if self._snapshot_store is not None:
