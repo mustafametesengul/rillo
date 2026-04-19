@@ -3,10 +3,8 @@ from typing import Sequence, TypeVar, override
 from pydantic import BaseModel, JsonValue
 
 try:
-    from nats.errors import TimeoutError as NatsTimeoutError
-    from nats.js.api import ConsumerConfig, DeliverPolicy
     from nats.js.client import JetStreamContext
-    from nats.js.errors import KeyNotFoundError
+    from nats.js.errors import KeyNotFoundError, NotFoundError
     from nats.js.kv import KeyValue
 except ImportError as e:
     raise ImportError(
@@ -75,13 +73,13 @@ class NATSRepository(Repository[A]):
     def __init__(
         self,
         js: JetStreamContext,
+        stream_name: str,
         subject_prefix: str,
         snapshot_store: SnapshotStore[A] | None = None,
-        consume_timeout: float = 5.0,
     ) -> None:
         self._js = js
+        self._stream_name = stream_name
         self._subject_prefix = subject_prefix
-        self._consume_timeout = consume_timeout
         super().__init__(snapshot_store=snapshot_store)
 
     @override
@@ -121,33 +119,25 @@ class NATSRepository(Repository[A]):
         _validate_aggregate_id(aggregate_id)
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
-        if from_version is not None:
-            config = ConsumerConfig(
-                deliver_policy=DeliverPolicy.BY_START_SEQUENCE,
-                opt_start_seq=int(from_version) + 1,
-            )
-        else:
-            config = ConsumerConfig(
-                deliver_policy=DeliverPolicy.ALL,
-            )
-
-        sub = await self._js.subscribe(subject, config=config)
-
+        seq = int(from_version) + 1 if from_version is not None else 1
         all_events: list[JsonValue] = []
         version = from_version or "0"
 
-        try:
-            while True:
-                try:
-                    msg = await sub.next_msg(timeout=self._consume_timeout)
-                    event_batch = EventBatch.model_validate_json(
-                        msg.data.decode("utf-8")
-                    )
-                    all_events.extend(event_batch.events)
-                    version = str(msg.metadata.sequence.stream)
-                except NatsTimeoutError:
+        while True:
+            try:
+                msg = await self._js.get_msg(
+                    self._stream_name,
+                    seq=seq,
+                    subject=subject,
+                    next=True,
+                )
+                if msg.data is None or msg.seq is None:
                     break
-        finally:
-            await sub.unsubscribe()
+                event_batch = EventBatch.model_validate_json(msg.data.decode("utf-8"))
+                all_events.extend(event_batch.events)
+                version = str(msg.seq)
+                seq = msg.seq + 1
+            except NotFoundError:
+                break
 
         return all_events, version
