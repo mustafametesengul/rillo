@@ -14,7 +14,7 @@ except ImportError as e:
 import json
 
 from rillo.aggregate import Aggregate
-from rillo.repository import Repository
+from rillo.repository import OptimisticConcurrencyError, Repository
 from rillo.snapshot_store import SnapshotStore
 
 A = TypeVar("A", bound=Aggregate)
@@ -54,13 +54,13 @@ class NATSRepository(Repository[A]):
         self,
         js: JetStreamContext,
         subject_prefix: str,
-        event_discriminator: str | None = None,
+        schema_discriminator: str,
         snapshot_store: SnapshotStore[A] | None = None,
     ) -> None:
         self._js = js
         self._subject_prefix = subject_prefix
         super().__init__(
-            event_discriminator=event_discriminator,
+            schema_discriminator=schema_discriminator,
             snapshot_store=snapshot_store,
         )
 
@@ -69,31 +69,47 @@ class NATSRepository(Repository[A]):
         self,
         aggregate_id: str,
         events: Sequence[JsonValue],
-        expected_version: int | None,
+        expected_version: int,
     ) -> None:
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
-        for event in events:
-            await self._js.publish(
-                subject,
-                json.dumps(event).encode("utf-8"),
-            )
+        for i, event in enumerate(events):
+            headers = None
+            if expected_version is not None:
+                headers = {
+                    "Nats-Expected-Last-Subject-Sequence": str(expected_version + i)
+                }
+            try:
+                await self._js.publish(
+                    subject,
+                    json.dumps(event).encode("utf-8"),
+                    headers=headers,
+                )
+            except Exception as e:
+                if "wrong last sequence" in str(e).lower():
+                    raise OptimisticConcurrencyError(
+                        f"Concurrency conflict for aggregate {aggregate_id}"
+                    ) from e
+                raise
 
     @override
     async def _load_events(
         self,
         aggregate_id: str,
-        from_version: int | None,
+        from_version: int,
     ) -> Sequence[JsonValue]:
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
         events = []
+        events_to_skip = from_version or 0
         sub: JetStreamContext.PushSubscription | None = None
         try:
-            pass
-            sub = await self._js.subscribe(subject)
+            sub = await self._js.subscribe(subject, ordered_consumer=True)
             while True:
                 msg = await sub.next_msg(timeout=0.1)
+                if events_to_skip > 0:
+                    events_to_skip -= 1
+                    continue
                 events.append(json.loads(msg.data.decode("utf-8")))
         except NatsTimeoutError:
             pass

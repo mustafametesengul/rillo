@@ -17,14 +17,14 @@ class Aggregate(Generic[S]):
         self._state: S | None = None
         self._pending_events: list[BaseModel] = []
         self._mutators: dict[type[BaseModel], Callable[[Any], None]] = {}
-        self._version: int | None = None
+        self._version: int = 0
 
     @property
     def id(self) -> str:
         return self._id
 
     @property
-    def version(self) -> int | None:
+    def version(self) -> int:
         return self._version
 
     @property
@@ -41,7 +41,7 @@ class Aggregate(Generic[S]):
             raise ValueError(f"No mutator registered for event type {event_type}.")
         mutator_func = self._mutators[event_type]
         mutator_func(event)
-        self._version = (self._version or 0) + 1
+        self._version += 1
 
     def _publish(self, event: BaseModel) -> None:
         self._pending_events.append(event)

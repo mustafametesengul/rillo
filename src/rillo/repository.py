@@ -16,41 +16,32 @@ class OptimisticConcurrencyError(Exception):
 class Repository(Generic[A], ABC):
     def __init__(
         self,
-        event_discriminator: str | None = None,
+        schema_discriminator: str,
         snapshot_store: SnapshotStore[A] | None = None,
     ) -> None:
-        self._event_discriminator = event_discriminator
+        self._schema_discriminator = schema_discriminator
         self._snapshot_store = snapshot_store
 
-    def _deserialize_event(self, aggregate: A, event: JsonValue) -> BaseModel:
-        """Deserialize a JSON string into a typed event."""
-        if self._event_discriminator is not None:
-            union_type = Union[aggregate.event_types]
-            adapter = TypeAdapter(
-                Annotated[union_type, Discriminator(self._event_discriminator)]
-            )
-            return adapter.validate_python(event)
-
-        for event_type in aggregate.event_types:
-            try:
-                return TypeAdapter(event_type).validate_python(event)
-            except Exception:
-                continue
-        raise ValueError("No matching event type found for the provided JSON.")
+    def _parse_event(self, aggregate: A, event: JsonValue) -> BaseModel:
+        union_type = Union[aggregate.event_types]
+        adapter = TypeAdapter(
+            Annotated[union_type, Discriminator(self._schema_discriminator)]
+        )
+        return adapter.validate_python(event)
 
     @abstractmethod
     async def _save_events(
         self,
         aggregate_id: str,
         events: Sequence[JsonValue],
-        expected_version: int | None,
+        expected_version: int,
     ) -> None: ...
 
     @abstractmethod
     async def _load_events(
         self,
         aggregate_id: str,
-        from_version: int | None,
+        from_version: int,
     ) -> Sequence[JsonValue]: ...
 
     async def save(self, aggregate: A) -> None:
@@ -73,5 +64,5 @@ class Repository(Generic[A], ABC):
 
         events = await self._load_events(aggregate.id, aggregate.version)
         for event in events:
-            event_model = self._deserialize_event(aggregate, event)
+            event_model = self._parse_event(aggregate, event)
             aggregate.apply(event_model)

@@ -66,7 +66,7 @@ class UserRepository(NATSRepository[User]):
         super().__init__(
             js,
             subject_prefix=subject,
-            event_discriminator="schema_version",
+            schema_discriminator="schema_version",
         )
 
 
