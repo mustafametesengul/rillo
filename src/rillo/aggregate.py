@@ -1,6 +1,6 @@
-from typing import Any, Callable, Generic, TypeVar
+from typing import Annotated, Any, Callable, Generic, TypeVar, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Discriminator, JsonValue, TypeAdapter
 
 S = TypeVar("S", bound=BaseModel)
 E = TypeVar("E", bound=BaseModel)
@@ -11,13 +11,45 @@ class Aggregate(Generic[S]):
         self,
         id: str,
         state_class: type[S],
+        schema_discriminator: str = "schema_version",
     ) -> None:
         self._id: str = id
         self._state_class: type[S] = state_class
         self._state: S | None = None
         self._pending_events: list[BaseModel] = []
+        self._schema_discriminator: str = schema_discriminator
         self._mutators: dict[type[BaseModel], Callable[[Any], None]] = {}
+        self._notifications: set[type[BaseModel]] = set()
         self._version: int = 0
+
+    def _add_mutator(self, event_type: type[E], mutator: Callable[[E], None]) -> None:
+        self._mutators[event_type] = mutator
+
+    def _add_notification(self, event_type: type[E]) -> None:
+        self._notifications.add(event_type)
+
+    def _parse_event(self, event: JsonValue) -> BaseModel:
+        event_types = tuple(self._mutators.keys() | self._notifications)
+        union_type = Union[event_types]
+        adapter = TypeAdapter(
+            Annotated[union_type, Discriminator(self._schema_discriminator)]
+        )
+        return adapter.validate_python(event)
+
+    def _parse_state(self, state: JsonValue) -> S:
+        adapter = TypeAdapter(self._state_class)
+        return adapter.validate_python(state)
+
+    def _publish(self, event: BaseModel) -> None:
+        event_type = type(event)
+        if event_type in self._mutators:
+            mutator_func = self._mutators[event_type]
+            mutator_func(event)
+        elif event_type not in self._notifications:
+            msg = f"Event type {event_type} is not registered as a mutator or notification."
+            raise ValueError(msg)
+        self._pending_events.append(event)
+        self._version += 1
 
     @property
     def id(self) -> str:
@@ -28,43 +60,24 @@ class Aggregate(Generic[S]):
         return self._version
 
     @property
-    def pending_events(self) -> list[BaseModel]:
-        return self._pending_events.copy()
+    def pending_events(self) -> list[JsonValue]:
+        return [event.model_dump(mode="json") for event in self._pending_events]
 
-    def _add_mutator(self, event_type: type[E], mutator: Callable[[E], None]) -> None:
-        self._mutators[event_type] = mutator
-
-    def apply(self, event: BaseModel) -> None:
-        """Route the event to the registered mutator."""
-        event_type = type(event)
-        if event_type not in self._mutators:
-            raise ValueError(f"No mutator registered for event type {event_type}.")
-        mutator_func = self._mutators[event_type]
-        mutator_func(event)
+    def apply(self, event: JsonValue) -> None:
+        parsed_event = self._parse_event(event)
+        event_type = type(parsed_event)
+        if event_type in self._mutators:
+            mutator_func = self._mutators[event_type]
+            mutator_func(parsed_event)
         self._version += 1
 
-    def _publish(self, event: BaseModel) -> None:
-        self._pending_events.append(event)
-        self.apply(event)
-
-    def get_state(self) -> BaseModel | None:
+    def get_state(self) -> JsonValue | None:
         if self._state is None:
             return None
-        return self._state.model_copy()
+        return self._state.model_dump(mode="json")
 
-    def load_state(self, value: BaseModel, version: int) -> None:
-        if not isinstance(value, self._state_class):
-            raise ValueError(
-                f"Invalid state type: expected {self._state_class}, got {type(value)}"
-            )
+    def load_state(self, state: JsonValue, version: int) -> None:
+        value = self._parse_state(state)
         self._state = value
         self._version = version
         self._pending_events.clear()
-
-    @property
-    def event_types(self) -> tuple[type[BaseModel], ...]:
-        return tuple(self._mutators.keys())
-
-    @property
-    def state_type(self) -> type[BaseModel]:
-        return self._state_class

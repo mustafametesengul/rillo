@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Annotated, Generic, Sequence, TypeVar, Union
+from typing import Generic, Sequence, TypeVar
 
-from pydantic import BaseModel, Discriminator, JsonValue, TypeAdapter
+from pydantic import JsonValue
 
 from rillo.aggregate import Aggregate
 from rillo.snapshot_store import SnapshotStore
@@ -16,18 +16,9 @@ class OptimisticConcurrencyError(Exception):
 class Repository(Generic[A], ABC):
     def __init__(
         self,
-        schema_discriminator: str,
         snapshot_store: SnapshotStore[A] | None = None,
     ) -> None:
-        self._schema_discriminator = schema_discriminator
         self._snapshot_store = snapshot_store
-
-    def _parse_event(self, aggregate: A, event: JsonValue) -> BaseModel:
-        union_type = Union[aggregate.event_types]
-        adapter = TypeAdapter(
-            Annotated[union_type, Discriminator(self._schema_discriminator)]
-        )
-        return adapter.validate_python(event)
 
     @abstractmethod
     async def _save_events(
@@ -49,9 +40,7 @@ class Repository(Generic[A], ABC):
         if len(events) == 0:
             return
 
-        json_events = [event.model_dump(mode="json") for event in events]
-
-        await self._save_events(aggregate.id, json_events, aggregate.version)
+        await self._save_events(aggregate.id, events, aggregate.version)
 
         if self._snapshot_store is None:
             return
@@ -64,5 +53,4 @@ class Repository(Generic[A], ABC):
 
         events = await self._load_events(aggregate.id, aggregate.version)
         for event in events:
-            event_model = self._parse_event(aggregate, event)
-            aggregate.apply(event_model)
+            aggregate.apply(event)
