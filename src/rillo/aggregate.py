@@ -19,17 +19,18 @@ class Aggregate(Generic[S]):
         self._pending_events: list[BaseModel] = []
         self._schema_discriminator: str = schema_discriminator
         self._mutators: dict[type[BaseModel], Callable[[Any], None]] = {}
-        self._notifications: set[type[BaseModel]] = set()
         self._version: int = 0
 
-    def _add_mutator(self, event_type: type[E], mutator: Callable[[E], None]) -> None:
+    def _add_mutator(
+        self,
+        event_type: type[E],
+        mutator: Callable[[E], None] | None = None,
+    ) -> None:
+        mutator = mutator if mutator is not None else lambda _: None
         self._mutators[event_type] = mutator
 
-    def _add_notification(self, event_type: type[E]) -> None:
-        self._notifications.add(event_type)
-
     def _parse_event(self, event: JsonValue) -> BaseModel:
-        event_types = tuple(self._mutators.keys() | self._notifications)
+        event_types = tuple(self._mutators.keys())
         union_type = Union[event_types]
         adapter = TypeAdapter(
             Annotated[union_type, Discriminator(self._schema_discriminator)]
@@ -40,16 +41,17 @@ class Aggregate(Generic[S]):
         adapter = TypeAdapter(self._state_class)
         return adapter.validate_python(state)
 
-    def _publish(self, event: BaseModel) -> None:
+    def _apply(self, event: BaseModel) -> None:
         event_type = type(event)
-        if event_type in self._mutators:
-            mutator_func = self._mutators[event_type]
-            mutator_func(event)
-        elif event_type not in self._notifications:
-            msg = f"Event type {event_type} is not registered as a mutator or notification."
-            raise ValueError(msg)
-        self._pending_events.append(event)
+        if event_type not in self._mutators:
+            raise ValueError(f"No mutator registered for event type {event_type}.")
+        mutator_func = self._mutators[event_type]
+        mutator_func(event)
         self._version += 1
+
+    def _publish(self, event: BaseModel) -> None:
+        self._apply(event)
+        self._pending_events.append(event)
 
     @property
     def id(self) -> str:
@@ -65,11 +67,7 @@ class Aggregate(Generic[S]):
 
     def apply(self, event: JsonValue) -> None:
         parsed_event = self._parse_event(event)
-        event_type = type(parsed_event)
-        if event_type in self._mutators:
-            mutator_func = self._mutators[event_type]
-            mutator_func(parsed_event)
-        self._version += 1
+        self._apply(parsed_event)
 
     def get_state(self) -> JsonValue | None:
         if self._state is None:
