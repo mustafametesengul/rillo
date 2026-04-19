@@ -78,7 +78,8 @@ class NATSRepository(Repository[A]):
 
         event_batch = EventBatch(events=events)
 
-        headers = {"Nats-Expected-Last-Subject-Sequence": str(expected_version)}
+        expected_version = expected_version or "0"
+        headers = {"Nats-Expected-Last-Subject-Sequence": expected_version}
         try:
             result = await self._js.publish(
                 subject,
