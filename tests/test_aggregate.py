@@ -1,88 +1,146 @@
-import asyncio
-from typing import Literal
-from uuid import UUID, uuid4
-
-import nats
-from nats.js.client import JetStreamContext
-from pydantic import BaseModel
-
-from rillo import Aggregate
-from rillo.nats import NATSRepository
+import pytest
+from conftest import User
+from pydantic import JsonValue
 
 
-class UserSignedUp(BaseModel):
-    schema_version: Literal["UserSignedUpV1"] = "UserSignedUpV1"
-    username: str
-    password_hash: str
+class TestAggregateInit:
+    def test_id(self, user: User) -> None:
+        assert user.id == "user-1"
+
+    def test_initial_version_is_none(self, user: User) -> None:
+        assert user.version is None
+
+    def test_initial_state_is_none(self, user: User) -> None:
+        assert user.get_state() is None
+
+    def test_no_pending_events(self, user: User) -> None:
+        assert user.pending_events == []
 
 
-class AccountDeleted(BaseModel):
-    schema_version: Literal["AccountDeletedV1"] = "AccountDeletedV1"
+class TestPublishAndMutate:
+    def test_publish_applies_event(self, user: User) -> None:
+        user.sign_up("alice", "hash123")
+        state = user.get_state()
+        assert isinstance(state, dict)
+        assert state["username"] == "alice"
+        assert state["password_hash"] == "hash123"
+        assert state["account_deleted"] is False
+
+    def test_publish_adds_pending_event(self, user: User) -> None:
+        user.sign_up("alice", "hash123")
+        assert len(user.pending_events) == 1
+        pending = user.pending_events[0]
+        assert isinstance(pending, dict)
+        assert pending["schema_version"] == "UserSignedUpV1"
+
+    def test_multiple_events(self, user: User) -> None:
+        user.sign_up("alice", "hash123")
+        user.delete_account()
+        assert len(user.pending_events) == 2
+        state = user.get_state()
+        assert isinstance(state, dict)
+        assert state["account_deleted"] is True
+
+    def test_pending_events_serialized_as_json(self, user: User) -> None:
+        user.sign_up("alice", "hash123")
+        event = user.pending_events[0]
+        assert isinstance(event, dict)
+        assert event == {
+            "schema_version": "UserSignedUpV1",
+            "username": "alice",
+            "password_hash": "hash123",
+        }
 
 
-class UserState(BaseModel):
-    schema_version: Literal["UserStateV1"] = "UserStateV1"
-    username: str
-    password_hash: str
-    account_deleted: bool
+class TestApplyFromJson:
+    def test_apply_single_event(self, user: User) -> None:
+        events: list[JsonValue] = [
+            {
+                "schema_version": "UserSignedUpV1",
+                "username": "bob",
+                "password_hash": "pw",
+            },
+        ]
+        user.apply(events, "1")
+        state = user.get_state()
+        assert isinstance(state, dict)
+        assert state["username"] == "bob"
+        assert user.version == "1"
+
+    def test_apply_multiple_events(self, user: User) -> None:
+        events: list[JsonValue] = [
+            {
+                "schema_version": "UserSignedUpV1",
+                "username": "bob",
+                "password_hash": "pw",
+            },
+            {"schema_version": "AccountDeletedV1"},
+        ]
+        user.apply(events, "2")
+        state = user.get_state()
+        assert isinstance(state, dict)
+        assert state["account_deleted"] is True
+        assert user.version == "2"
+
+    def test_apply_does_not_add_pending_events(self, user: User) -> None:
+        events: list[JsonValue] = [
+            {
+                "schema_version": "UserSignedUpV1",
+                "username": "bob",
+                "password_hash": "pw",
+            },
+        ]
+        user.apply(events, "1")
+        assert user.pending_events == []
 
 
-class User(Aggregate[UserState]):
-    def __init__(self, id: UUID) -> None:
-        super().__init__(str(id), UserState)
-        self._add_mutator(UserSignedUp, self.apply_user_signed_up)
-        self._add_mutator(AccountDeleted, self.apply_account_deleted)
+class TestLoadState:
+    def test_load_state_restores_state(self, user: User) -> None:
+        state = {
+            "schema_version": "UserStateV1",
+            "username": "carol",
+            "password_hash": "h",
+            "account_deleted": False,
+        }
+        user.load_state(state, "5")
+        assert user.get_state() == state
+        assert user.version == "5"
 
-    def apply_user_signed_up(self, event: UserSignedUp) -> None:
-        self._state = UserState(
-            username=event.username,
-            password_hash=event.password_hash,
-            account_deleted=False,
-        )
-
-    def apply_account_deleted(self, _: AccountDeleted) -> None:
-        if self._state is None:
-            raise ValueError("User does not exist.")
-        self._state.account_deleted = True
-
-    def sign_up_with_username(self, username: str, password_hash: str) -> None:
-        self._publish(
-            UserSignedUp(
-                username=username,
-                password_hash=password_hash,
-            )
-        )
-
-    def delete_account(self) -> None:
-        if self._state is None:
-            raise ValueError("User does not exist.")
-        if self._state.account_deleted:
-            raise ValueError("Account is already deleted.")
-        self._publish(AccountDeleted())
+    def test_load_state_clears_pending_events(self, user: User) -> None:
+        user.sign_up("alice", "hash123")
+        assert len(user.pending_events) == 1
+        state = {
+            "schema_version": "UserStateV1",
+            "username": "carol",
+            "password_hash": "h",
+            "account_deleted": False,
+        }
+        user.load_state(state, "5")
+        assert user.pending_events == []
 
 
-class UserRepository(NATSRepository[User]):
-    def __init__(self, js: JetStreamContext, subject: str) -> None:
-        super().__init__(
-            js,
-            subject_prefix=subject,
-        )
+class TestMarkEventsAsCommitted:
+    def test_clears_pending_and_sets_version(self, user: User) -> None:
+        user.sign_up("alice", "hash123")
+        assert len(user.pending_events) == 1
+        user.mark_events_as_committed("10")
+        assert user.pending_events == []
+        assert user.version == "10"
 
 
-async def test_user_repository() -> None:
-    host = "localhost"
-    port = 4222
-    nc = await nats.connect(f"nats://{host}:{port}")
-    js = nc.jetstream()
-    await js.add_stream(name="test", subjects=["user.*"])
-    user_repository = UserRepository(js, subject="user")
+class TestDomainLogicErrors:
+    def test_delete_without_signup_raises(self, user: User) -> None:
+        with pytest.raises(ValueError, match="User does not exist"):
+            user.delete_account()
 
-    user = User(uuid4())
-    user.sign_up_with_username("testuser", "hashedpassword")
-    await user_repository.save(user)
-
-    await nc.close()
+    def test_double_delete_raises(self, user: User) -> None:
+        user.sign_up("alice", "hash123")
+        user.delete_account()
+        with pytest.raises(ValueError, match="Account is already deleted"):
+            user.delete_account()
 
 
-if __name__ == "__main__":
-    asyncio.run(test_user_repository())
+class TestUnregisteredEvent:
+    def test_apply_unregistered_event_raises(self, user: User) -> None:
+        with pytest.raises(Exception):
+            user.apply([{"schema_version": "UnknownV1"}], "1")

@@ -31,9 +31,9 @@ class Aggregate(Generic[S]):
 
     def _parse_event(self, event: JsonValue) -> BaseModel:
         event_types = tuple(self._mutators.keys())
-        union_type = Union[event_types]
+        union_type = Union[event_types]  # type: ignore[valid-type]
         adapter = TypeAdapter(
-            Annotated[union_type, Discriminator(self._schema_discriminator)]
+            Annotated[union_type, Discriminator(self._schema_discriminator)]  # ty: ignore[invalid-type-form]
         )
         return adapter.validate_python(event)
 
