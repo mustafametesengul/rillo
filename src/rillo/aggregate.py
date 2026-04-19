@@ -65,10 +65,19 @@ class Aggregate(Generic[S]):
         return [event.model_dump(mode="json") for event in self._pending_events]
 
     def apply(self, events: Sequence[JsonValue], version: str) -> None:
-        for event in events:
-            parsed_event = self._parse_event(event)
-            self._apply(parsed_event)
-        self._version = version
+        original_state = None
+        if self._state is not None:
+            original_state = self._state.model_copy(deep=True)
+        original_version = self._version
+        try:
+            for event in events:
+                parsed_event = self._parse_event(event)
+                self._apply(parsed_event)
+            self._version = version
+        except Exception:
+            self._state = original_state
+            self._version = original_version
+            raise
 
     def get_state(self) -> JsonValue | None:
         if self._state is None:

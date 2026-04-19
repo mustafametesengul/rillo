@@ -6,6 +6,7 @@ try:
     from nats.errors import TimeoutError as NatsTimeoutError
     from nats.js.api import ConsumerConfig, DeliverPolicy
     from nats.js.client import JetStreamContext
+    from nats.js.errors import KeyNotFoundError
     from nats.js.kv import KeyValue
 except ImportError as e:
     raise ImportError(
@@ -18,6 +19,15 @@ from rillo.repository import OptimisticConcurrencyError, Repository
 from rillo.snapshot_store import SnapshotStore
 
 A = TypeVar("A", bound=Aggregate)
+
+_INVALID_SUBJECT_CHARS = set(".*> \t\n\r\0")
+
+
+def _validate_aggregate_id(aggregate_id: str) -> None:
+    if not aggregate_id or any(c in _INVALID_SUBJECT_CHARS for c in aggregate_id):
+        raise ValueError(
+            "aggregate_id must not be empty or contain '.', '*', '>', or whitespace characters"
+        )
 
 
 class Snapshot(BaseModel):
@@ -35,7 +45,11 @@ class NATSSnapshotStore(SnapshotStore[A]):
 
     @override
     async def _load_state(self, aggregate_id: str) -> tuple[JsonValue, str] | None:
-        entry = await self._kv.get(aggregate_id)
+        _validate_aggregate_id(aggregate_id)
+        try:
+            entry = await self._kv.get(aggregate_id)
+        except KeyNotFoundError:
+            return None
         value = entry.value
         if value is None:
             return None
@@ -49,6 +63,7 @@ class NATSSnapshotStore(SnapshotStore[A]):
         state: JsonValue,
         version: str,
     ) -> None:
+        _validate_aggregate_id(aggregate_id)
         snapshot = Snapshot(
             state=state,
             version=version,
@@ -62,9 +77,11 @@ class NATSRepository(Repository[A]):
         js: JetStreamContext,
         subject_prefix: str,
         snapshot_store: SnapshotStore[A] | None = None,
+        consume_timeout: float = 5.0,
     ) -> None:
         self._js = js
         self._subject_prefix = subject_prefix
+        self._consume_timeout = consume_timeout
         super().__init__(snapshot_store=snapshot_store)
 
     @override
@@ -74,6 +91,7 @@ class NATSRepository(Repository[A]):
         events: Sequence[JsonValue],
         expected_version: str | None,
     ) -> str:
+        _validate_aggregate_id(aggregate_id)
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
         event_batch = EventBatch(events=events)
@@ -100,6 +118,7 @@ class NATSRepository(Repository[A]):
         aggregate_id: str,
         from_version: str | None,
     ) -> tuple[Sequence[JsonValue], str]:
+        _validate_aggregate_id(aggregate_id)
         subject = f"{self._subject_prefix}.{aggregate_id}"
 
         if from_version is not None:
@@ -120,7 +139,7 @@ class NATSRepository(Repository[A]):
         try:
             while True:
                 try:
-                    msg = await sub.next_msg(timeout=1)
+                    msg = await sub.next_msg(timeout=self._consume_timeout)
                     event_batch = EventBatch.model_validate_json(
                         msg.data.decode("utf-8")
                     )
