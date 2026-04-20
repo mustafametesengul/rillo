@@ -6,35 +6,52 @@ S = TypeVar("S", bound=BaseModel)
 E = TypeVar("E", bound=BaseModel)
 
 
+def mutator(
+    event_type: type[E],
+) -> Callable[[Callable[..., None]], Callable[..., None]]:
+    def decorator(func: Callable[..., None]) -> Callable[..., None]:
+        setattr(func, "_event_type", event_type)
+        return func
+
+    return decorator
+
+
 class Aggregate(Generic[S]):
-    def __init__(
-        self,
-        id: str,
+    _state_class: type[S]
+    _schema_discriminator: str = "schema_version"
+    _mutator_map: dict[type[BaseModel], str] = {}
+    _event_types: dict[str, type[BaseModel]] = {}
+
+    def __init_subclass__(
+        cls,
         state_class: type[S],
         schema_discriminator: str = "schema_version",
+        **kwargs: Any,
     ) -> None:
+        super().__init_subclass__(**kwargs)
+        if state_class is not None:
+            cls._state_class = state_class
+        cls._schema_discriminator = schema_discriminator
+
+        cls._mutator_map = dict(getattr(cls, "_mutator_map", {}))
+        cls._event_types = dict(getattr(cls, "_event_types", {}))
+
+        for attr_name in vars(cls):
+            attr = getattr(cls, attr_name)
+            if callable(attr) and hasattr(attr, "_event_type"):
+                event_type = getattr(attr, "_event_type")
+                cls._mutator_map[event_type] = attr_name
+                disc_annotation = event_type.model_fields[
+                    cls._schema_discriminator
+                ].annotation
+                disc_value = str(get_args(disc_annotation)[0])
+                cls._event_types[disc_value] = event_type
+
+    def __init__(self, id: str) -> None:
         self._id: str = id
         self._state: S | None = None
         self._pending_events: list[BaseModel] = []
         self._version: int = 0
-
-        self._state_class: type[S] = state_class
-        self._schema_discriminator: str = schema_discriminator
-        self._mutators: dict[type[BaseModel], Callable[[Any], None]] = {}
-        self._event_types: dict[str, type[BaseModel]] = {}
-
-    def _add_mutator(
-        self,
-        event_type: type[E],
-        mutator: Callable[[E], None] | None = None,
-    ) -> None:
-        mutator = mutator if mutator is not None else lambda _: None
-        self._mutators[event_type] = mutator
-        discriminator_annotation = event_type.model_fields[
-            self._schema_discriminator
-        ].annotation
-        discriminator_value = str(get_args(discriminator_annotation)[0])
-        self._event_types[discriminator_value] = event_type
 
     def _parse_event(self, event: JsonValue) -> BaseModel:
         if type(event) is not dict or self._schema_discriminator not in event:
@@ -52,10 +69,10 @@ class Aggregate(Generic[S]):
 
     def _apply(self, event: BaseModel) -> None:
         event_type = type(event)
-        if event_type not in self._mutators:
+        if event_type not in self._mutator_map:
             raise ValueError(f"No mutator registered for event type {event_type}.")
-        mutator_func = self._mutators[event_type]
-        mutator_func(event)
+        method_name = self._mutator_map[event_type]
+        getattr(self, method_name)(event)
 
     def _publish(self, event: BaseModel) -> None:
         self._apply(event)
@@ -104,4 +121,4 @@ class Aggregate(Generic[S]):
         self._version = version
 
 
-__all__ = ["Aggregate"]
+__all__ = ["Aggregate", "mutator"]

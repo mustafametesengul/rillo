@@ -5,6 +5,7 @@ import pytest
 from pydantic import BaseModel
 
 from rillo import Aggregate
+from rillo.aggregate import mutator
 
 
 class UserSignedUp(BaseModel):
@@ -24,12 +25,11 @@ class UserState(BaseModel):
     account_deleted: bool
 
 
-class User(Aggregate[UserState]):
+class User(Aggregate[UserState], state_class=UserState):
     def __init__(self, id: str | None = None) -> None:
-        super().__init__(id or str(uuid4()), UserState)
-        self._add_mutator(UserSignedUp, self.apply_user_signed_up)
-        self._add_mutator(AccountDeleted, self.apply_account_deleted)
+        super().__init__(id or str(uuid4()))
 
+    @mutator(UserSignedUp)
     def apply_user_signed_up(self, event: UserSignedUp) -> None:
         self._state = UserState(
             username=event.username,
@@ -37,6 +37,7 @@ class User(Aggregate[UserState]):
             account_deleted=False,
         )
 
+    @mutator(AccountDeleted)
     def apply_account_deleted(self, _: AccountDeleted) -> None:
         if self._state is None:
             raise ValueError("User does not exist.")
