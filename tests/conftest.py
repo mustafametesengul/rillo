@@ -24,7 +24,7 @@ class UserState(BaseModel):
 
 
 class User(Aggregate[UserState]):
-    @mutator(UserSignedUp)
+    @mutator
     def apply_user_signed_up(self, event: UserSignedUp) -> None:
         self._state = UserState(
             username=event.username,
@@ -32,7 +32,7 @@ class User(Aggregate[UserState]):
             account_deleted=False,
         )
 
-    @mutator(AccountDeleted)
+    @mutator
     def apply_account_deleted(self, _: AccountDeleted) -> None:
         if self._state is None:
             raise ValueError("User does not exist.")

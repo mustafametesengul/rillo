@@ -1,19 +1,24 @@
-from typing import Any, Callable, Generic, Sequence, TypeVar, get_args
+import inspect
+from typing import Any, Callable, Generic, Sequence, TypeVar, get_args, get_type_hints
 
 from pydantic import BaseModel, JsonValue
 
 S = TypeVar("S", bound=BaseModel)
-E = TypeVar("E", bound=BaseModel)
 
 
-def mutator(
-    event_type: type[E],
-) -> Callable[[Callable[..., None]], Callable[..., None]]:
-    def decorator(func: Callable[..., None]) -> Callable[..., None]:
-        setattr(func, "_event_type", event_type)
-        return func
-
-    return decorator
+def mutator(func: Callable[..., None]) -> Callable[..., None]:
+    hints = get_type_hints(func)
+    params = list(inspect.signature(func).parameters)
+    if len(params) < 2:
+        raise TypeError("Mutator must have at least one event parameter besides self.")
+    event_param = params[1]
+    event_type = hints.get(event_param)
+    if event_type is None:
+        raise TypeError(
+            f"Mutator parameter '{event_param}' must have a type annotation."
+        )
+    setattr(func, "_event_type", event_type)
+    return func
 
 
 class Aggregate(Generic[S]):
