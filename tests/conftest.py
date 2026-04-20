@@ -1,11 +1,9 @@
 from typing import Literal
-from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel
 
-from rillo import Aggregate
-from rillo.aggregate import mutator
+from rillo import Aggregate, mutator
 
 
 class UserSignedUp(BaseModel):
@@ -25,10 +23,7 @@ class UserState(BaseModel):
     account_deleted: bool
 
 
-class User(Aggregate[UserState], state_class=UserState):
-    def __init__(self, id: str | None = None) -> None:
-        super().__init__(id or str(uuid4()))
-
+class User(Aggregate[UserState]):
     @mutator(UserSignedUp)
     def apply_user_signed_up(self, event: UserSignedUp) -> None:
         self._state = UserState(

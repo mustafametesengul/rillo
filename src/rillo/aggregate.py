@@ -24,13 +24,22 @@ class Aggregate(Generic[S]):
 
     def __init_subclass__(
         cls,
-        state_class: type[S],
         schema_discriminator: str = "schema_version",
         **kwargs: Any,
     ) -> None:
         super().__init_subclass__(**kwargs)
-        if state_class is not None:
-            cls._state_class = state_class
+
+        state_class = None
+        for base in getattr(cls, "__orig_bases__", ()):
+            if getattr(base, "__origin__", None) is Aggregate:
+                args = get_args(base)
+                if args and isinstance(args[0], type):
+                    state_class = args[0]
+                    break
+        if state_class is None:
+            raise TypeError("Aggregate subclasses must specify a state class.")
+        cls._state_class = state_class
+
         cls._schema_discriminator = schema_discriminator
 
         cls._mutator_map = dict(getattr(cls, "_mutator_map", {}))
