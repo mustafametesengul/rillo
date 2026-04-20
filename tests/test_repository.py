@@ -11,11 +11,7 @@ from rillo.snapshot_store import SnapshotStore
 class InMemoryRepository(Repository[User]):
     """Simple in-memory repository for testing the base Repository logic."""
 
-    def __init__(
-        self,
-        snapshot_store: SnapshotStore[User] | None = None,
-    ) -> None:
-        super().__init__(snapshot_store=snapshot_store)
+    def __init__(self) -> None:
         self._streams: dict[str, list[JsonValue]] = {}
         self._seq: dict[str, int] = {}
 
@@ -165,23 +161,24 @@ class TestRepositoryWithSnapshotStore:
     @pytest.mark.asyncio
     async def test_load_uses_snapshot(self, repo: InMemoryRepository) -> None:
         snapshot_store = InMemorySnapshotStore()
-        repo_with_snap = InMemoryRepository(snapshot_store=snapshot_store)
 
         # Save initial events
         user = User("user-1")
         user.sign_up("alice", "hash123")
-        await repo_with_snap.save(user)
+        await repo.save(user)
 
         # Store snapshot
         await snapshot_store.save(user)
 
         # Add more events after snapshot
         user.delete_account()
-        await repo_with_snap.save(user)
+        await repo.save(user)
 
         # Load from scratch - should use snapshot + remaining events
         loaded = User("user-1")
-        await repo_with_snap.load(loaded)
+        await snapshot_store.load(loaded)
+        await repo.load(loaded)
+
         state = loaded.get_state()
         assert isinstance(state, dict)
         assert state["username"] == "alice"

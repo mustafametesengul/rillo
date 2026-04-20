@@ -32,3 +32,6 @@ class SnapshotStore(Generic[A], ABC):
         version = aggregate.version
         if state is not None and version != 0:
             await self._save_state(aggregate.id, state, version)
+
+
+__all__ = ["SnapshotStore"]

@@ -40,14 +40,6 @@ async def snapshot_store(js):
     await js.delete_key_value(bucket_name)
 
 
-@pytest_asyncio.fixture
-async def repo_with_snapshots(js, stream, snapshot_store):
-    stream_name, subject_prefix = stream
-    return NATSRepository[User](
-        js, stream_name, subject_prefix, snapshot_store=snapshot_store
-    )
-
-
 class TestNATSRepositorySave:
     @pytest.mark.asyncio
     async def test_save_and_load(self, repo: NATSRepository[User]) -> None:
@@ -176,19 +168,21 @@ class TestNATSRepositoryWithSnapshots:
     @pytest.mark.asyncio
     async def test_load_uses_snapshot(
         self,
-        repo_with_snapshots: NATSRepository[User],
+        repo: NATSRepository[User],
         snapshot_store: NATSSnapshotStore[User],
     ) -> None:
         user = User("user-1")
         user.sign_up("alice", "hash123")
-        await repo_with_snapshots.save(user)
+        await repo.save(user)
         await snapshot_store.save(user)
 
         user.delete_account()
-        await repo_with_snapshots.save(user)
+        await repo.save(user)
 
         loaded = User("user-1")
-        await repo_with_snapshots.load(loaded)
+        await snapshot_store.load(loaded)
+        await repo.load(loaded)
+
         state = loaded.get_state()
         assert isinstance(state, dict)
         assert state["account_deleted"] is True

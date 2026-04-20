@@ -4,7 +4,6 @@ from typing import Generic, Sequence, TypeVar
 from pydantic import JsonValue
 
 from rillo.aggregate import Aggregate
-from rillo.snapshot_store import SnapshotStore
 
 A = TypeVar("A", bound=Aggregate)
 
@@ -14,12 +13,6 @@ class OptimisticConcurrencyError(Exception):
 
 
 class Repository(Generic[A], ABC):
-    def __init__(
-        self,
-        snapshot_store: SnapshotStore[A] | None = None,
-    ) -> None:
-        self._snapshot_store = snapshot_store
-
     @abstractmethod
     async def _save_events(
         self,
@@ -43,8 +36,8 @@ class Repository(Generic[A], ABC):
         aggregate.mark_events_as_committed(new_version)
 
     async def load(self, aggregate: A) -> None:
-        if self._snapshot_store is not None:
-            await self._snapshot_store.load(aggregate)
-
         events, version = await self._load_events(aggregate.id, aggregate.version)
         aggregate.apply(events, version)
+
+
+__all__ = ["OptimisticConcurrencyError", "Repository"]

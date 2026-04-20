@@ -75,12 +75,10 @@ class NATSRepository(Repository[A]):
         js: JetStreamContext,
         stream_name: str,
         subject_prefix: str,
-        snapshot_store: SnapshotStore[A] | None = None,
     ) -> None:
         self._js = js
         self._stream_name = stream_name
         self._subject_prefix = subject_prefix
-        super().__init__(snapshot_store=snapshot_store)
 
     @override
     async def _save_events(
@@ -140,3 +138,6 @@ class NATSRepository(Repository[A]):
                 break
 
         return all_events, version
+
+
+__all__ = ["NATSRepository", "NATSSnapshotStore"]

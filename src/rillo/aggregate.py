@@ -93,3 +93,6 @@ class Aggregate(Generic[S]):
     def mark_events_as_committed(self, version: int) -> None:
         self._pending_events.clear()
         self._version = version
+
+
+__all__ = ["Aggregate"]
