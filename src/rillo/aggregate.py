@@ -1,6 +1,6 @@
-from typing import Annotated, Any, Callable, Generic, Sequence, TypeVar, Union
+from typing import Any, Callable, Generic, Sequence, TypeVar, get_args
 
-from pydantic import BaseModel, Discriminator, JsonValue, TypeAdapter
+from pydantic import BaseModel, JsonValue
 
 S = TypeVar("S", bound=BaseModel)
 E = TypeVar("E", bound=BaseModel)
@@ -14,12 +14,14 @@ class Aggregate(Generic[S]):
         schema_discriminator: str = "schema_version",
     ) -> None:
         self._id: str = id
-        self._state_class: type[S] = state_class
         self._state: S | None = None
         self._pending_events: list[BaseModel] = []
+        self._version: int = 0
+
+        self._state_class: type[S] = state_class
         self._schema_discriminator: str = schema_discriminator
         self._mutators: dict[type[BaseModel], Callable[[Any], None]] = {}
-        self._version: int = 0
+        self._event_types: dict[str, type[BaseModel]] = {}
 
     def _add_mutator(
         self,
@@ -28,18 +30,25 @@ class Aggregate(Generic[S]):
     ) -> None:
         mutator = mutator if mutator is not None else lambda _: None
         self._mutators[event_type] = mutator
+        discriminator_annotation = event_type.model_fields[
+            self._schema_discriminator
+        ].annotation
+        discriminator_value = str(get_args(discriminator_annotation)[0])
+        self._event_types[discriminator_value] = event_type
 
     def _parse_event(self, event: JsonValue) -> BaseModel:
-        event_types = tuple(self._mutators.keys())
-        union_type = Union[event_types]  # type: ignore[valid-type]
-        adapter = TypeAdapter(
-            Annotated[union_type, Discriminator(self._schema_discriminator)]  # ty: ignore[invalid-type-form]
-        )
-        return adapter.validate_python(event)
+        if type(event) is not dict or self._schema_discriminator not in event:
+            raise ValueError("Event must be a JSON object.")
+        event_type_value = event[self._schema_discriminator]
+
+        if event_type_value not in self._event_types:
+            raise ValueError(f"Unknown event type: {event_type_value}")
+
+        event_type = self._event_types[event_type_value]
+        return event_type.model_validate(event)
 
     def _parse_state(self, state: JsonValue) -> S:
-        adapter = TypeAdapter(self._state_class)
-        return adapter.validate_python(state)
+        return self._state_class.model_validate(state)
 
     def _apply(self, event: BaseModel) -> None:
         event_type = type(event)
