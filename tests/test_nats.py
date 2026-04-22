@@ -44,12 +44,12 @@ class TestNATSRepositorySave:
     @pytest.mark.asyncio
     async def test_save_and_load(self, repo: NATSRepository[User]) -> None:
         user = User("user-1")
-        user.sign_up("alice", "hash123")
+        user.sign_up_with_username("alice", "hash123")
         await repo.save(user)
 
         loaded = User("user-1")
         await repo.load(loaded)
-        state = loaded.get_state()
+        state = loaded.dump_state()
         assert isinstance(state, dict)
         assert state["username"] == "alice"
         assert state["password_hash"] == "hash123"
@@ -58,14 +58,14 @@ class TestNATSRepositorySave:
     @pytest.mark.asyncio
     async def test_save_clears_pending_events(self, repo: NATSRepository[User]) -> None:
         user = User("user-1")
-        user.sign_up("alice", "hash123")
+        user.sign_up_with_username("alice", "hash123")
         await repo.save(user)
         assert user.pending_events == []
 
     @pytest.mark.asyncio
     async def test_save_updates_version(self, repo: NATSRepository[User]) -> None:
         user = User("user-1")
-        user.sign_up("alice", "hash123")
+        user.sign_up_with_username("alice", "hash123")
         await repo.save(user)
         assert user.version is not None
         assert user.version > 0
@@ -73,13 +73,13 @@ class TestNATSRepositorySave:
     @pytest.mark.asyncio
     async def test_save_multiple_events(self, repo: NATSRepository[User]) -> None:
         user = User("user-1")
-        user.sign_up("alice", "hash123")
+        user.sign_up_with_username("alice", "hash123")
         user.delete_account()
         await repo.save(user)
 
         loaded = User("user-1")
         await repo.load(loaded)
-        state = loaded.get_state()
+        state = loaded.dump_state()
         assert isinstance(state, dict)
         assert state["account_deleted"] is True
 
@@ -95,13 +95,13 @@ class TestNATSRepositoryLoad:
     async def test_load_empty_aggregate(self, repo: NATSRepository[User]) -> None:
         user = User("nonexistent")
         await repo.load(user)
-        assert user.get_state() is None
+        assert user.dump_state() is None
         assert user.version == 0
 
     @pytest.mark.asyncio
     async def test_load_multiple_saves(self, repo: NATSRepository[User]) -> None:
         user = User("user-1")
-        user.sign_up("alice", "hash123")
+        user.sign_up_with_username("alice", "hash123")
         await repo.save(user)
 
         user.delete_account()
@@ -109,7 +109,7 @@ class TestNATSRepositoryLoad:
 
         loaded = User("user-1")
         await repo.load(loaded)
-        state = loaded.get_state()
+        state = loaded.dump_state()
         assert isinstance(state, dict)
         assert state["account_deleted"] is True
         assert loaded.version == user.version
@@ -119,7 +119,7 @@ class TestNATSOptimisticConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_save_raises(self, repo: NATSRepository[User]) -> None:
         user = User("user-1")
-        user.sign_up("alice", "hash123")
+        user.sign_up_with_username("alice", "hash123")
         await repo.save(user)
 
         user_a = User("user-1")
@@ -142,14 +142,14 @@ class TestNATSSnapshotStore:
         self, snapshot_store: NATSSnapshotStore[User]
     ) -> None:
         user = User("user-1")
-        user.sign_up("alice", "hash123")
-        user.mark_events_as_committed(1)
+        user.sign_up_with_username("alice", "hash123")
+        user.commit(1)
 
         await snapshot_store.save(user)
 
         loaded = User("user-1")
         await snapshot_store.load(loaded)
-        state = loaded.get_state()
+        state = loaded.dump_state()
         assert isinstance(state, dict)
         assert state["username"] == "alice"
         assert loaded.version == 1
@@ -160,7 +160,7 @@ class TestNATSSnapshotStore:
     ) -> None:
         user = User("no-such-user")
         await snapshot_store.load(user)
-        assert user.get_state() is None
+        assert user.dump_state() is None
         assert user.version == 0
 
 
@@ -172,7 +172,7 @@ class TestNATSRepositoryWithSnapshots:
         snapshot_store: NATSSnapshotStore[User],
     ) -> None:
         user = User("user-1")
-        user.sign_up("alice", "hash123")
+        user.sign_up_with_username("alice", "hash123")
         await repo.save(user)
         await snapshot_store.save(user)
 
@@ -183,7 +183,7 @@ class TestNATSRepositoryWithSnapshots:
         await snapshot_store.load(loaded)
         await repo.load(loaded)
 
-        state = loaded.get_state()
+        state = loaded.dump_state()
         assert isinstance(state, dict)
         assert state["account_deleted"] is True
         assert loaded.version == user.version

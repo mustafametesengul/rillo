@@ -67,11 +67,11 @@ class TestRepositorySave:
     async def test_save_persists_events(
         self, user: User, repo: InMemoryRepository
     ) -> None:
-        user.sign_up("alice", "hash123")
+        user.sign_up_with_username("alice", "hash123")
         await repo.save(user)
         assert repo._streams["user-1"] == [
             {
-                "schema_version": "UserSignedUpV1",
+                "type": "UserSignedUpV1",
                 "username": "alice",
                 "password_hash": "hash123",
             }
@@ -81,7 +81,7 @@ class TestRepositorySave:
     async def test_save_clears_pending_events(
         self, user: User, repo: InMemoryRepository
     ) -> None:
-        user.sign_up("alice", "hash123")
+        user.sign_up_with_username("alice", "hash123")
         await repo.save(user)
         assert user.pending_events == []
 
@@ -89,7 +89,7 @@ class TestRepositorySave:
     async def test_save_updates_version(
         self, user: User, repo: InMemoryRepository
     ) -> None:
-        user.sign_up("alice", "hash123")
+        user.sign_up_with_username("alice", "hash123")
         await repo.save(user)
         assert user.version == 1
 
@@ -104,7 +104,7 @@ class TestRepositorySave:
     async def test_save_multiple_events(
         self, user: User, repo: InMemoryRepository
     ) -> None:
-        user.sign_up("alice", "hash123")
+        user.sign_up_with_username("alice", "hash123")
         user.delete_account()
         await repo.save(user)
         assert len(repo._streams["user-1"]) == 2
@@ -115,12 +115,12 @@ class TestRepositoryLoad:
     @pytest.mark.asyncio
     async def test_load_restores_state(self, repo: InMemoryRepository) -> None:
         user = User("user-1")
-        user.sign_up("alice", "hash123")
+        user.sign_up_with_username("alice", "hash123")
         await repo.save(user)
 
         loaded_user = User("user-1")
         await repo.load(loaded_user)
-        state = loaded_user.get_state()
+        state = loaded_user.dump_state()
         assert isinstance(state, dict)
         assert state["username"] == "alice"
         assert loaded_user.version == 1
@@ -129,7 +129,7 @@ class TestRepositoryLoad:
     async def test_load_empty_aggregate(self, repo: InMemoryRepository) -> None:
         user = User("nonexistent")
         await repo.load(user)
-        assert user.get_state() is None
+        assert user.dump_state() is None
         assert user.version == 0
 
 
@@ -137,7 +137,7 @@ class TestOptimisticConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_save_raises(self, repo: InMemoryRepository) -> None:
         user1 = User("user-1")
-        user1.sign_up("alice", "hash123")
+        user1.sign_up_with_username("alice", "hash123")
         await repo.save(user1)
 
         # Simulate two loads of the same aggregate
@@ -164,7 +164,7 @@ class TestRepositoryWithSnapshotStore:
 
         # Save initial events
         user = User("user-1")
-        user.sign_up("alice", "hash123")
+        user.sign_up_with_username("alice", "hash123")
         await repo.save(user)
 
         # Store snapshot
@@ -179,7 +179,7 @@ class TestRepositoryWithSnapshotStore:
         await snapshot_store.load(loaded)
         await repo.load(loaded)
 
-        state = loaded.get_state()
+        state = loaded.dump_state()
         assert isinstance(state, dict)
         assert state["username"] == "alice"
         assert state["account_deleted"] is True

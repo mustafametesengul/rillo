@@ -7,17 +7,17 @@ from rillo import Aggregate, mutator
 
 
 class UserSignedUp(BaseModel):
-    schema_version: Literal["UserSignedUpV1"] = "UserSignedUpV1"
+    type: Literal["UserSignedUpV1"] = "UserSignedUpV1"
     username: str
     password_hash: str
 
 
 class AccountDeleted(BaseModel):
-    schema_version: Literal["AccountDeletedV1"] = "AccountDeletedV1"
+    type: Literal["AccountDeletedV1"] = "AccountDeletedV1"
 
 
 class UserState(BaseModel):
-    schema_version: Literal["UserStateV1"] = "UserStateV1"
+    type: Literal["UserStateV1"] = "UserStateV1"
     username: str
     password_hash: str
     account_deleted: bool
@@ -25,7 +25,7 @@ class UserState(BaseModel):
 
 class User(Aggregate[UserState]):
     @mutator
-    def apply_user_signed_up(self, event: UserSignedUp) -> None:
+    def on_user_signed_up(self, event: UserSignedUp) -> None:
         self._state = UserState(
             username=event.username,
             password_hash=event.password_hash,
@@ -33,20 +33,22 @@ class User(Aggregate[UserState]):
         )
 
     @mutator
-    def apply_account_deleted(self, _: AccountDeleted) -> None:
+    def on_account_deleted(self, _: AccountDeleted) -> None:
         if self._state is None:
             raise ValueError("User does not exist.")
         self._state.account_deleted = True
 
-    def sign_up(self, username: str, password_hash: str) -> None:
-        self._publish(UserSignedUp(username=username, password_hash=password_hash))
+    def sign_up_with_username(self, username: str, password_hash: str) -> None:
+        if self._state is not None:
+            raise ValueError("User already exists.")
+        self._apply(UserSignedUp(username=username, password_hash=password_hash))
 
     def delete_account(self) -> None:
         if self._state is None:
             raise ValueError("User does not exist.")
         if self._state.account_deleted:
             raise ValueError("Account is already deleted.")
-        self._publish(AccountDeleted())
+        self._apply(AccountDeleted())
 
 
 @pytest.fixture

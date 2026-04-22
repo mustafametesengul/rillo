@@ -8,14 +8,14 @@ class TestSnapshotStore:
     async def test_save_and_load(self) -> None:
         store = InMemorySnapshotStore()
         user = User("user-1")
-        user.sign_up("alice", "hash123")
-        user.mark_events_as_committed(1)
+        user.sign_up_with_username("alice", "hash123")
+        user.commit(1)
 
         await store.save(user)
 
         loaded = User("user-1")
         await store.load(loaded)
-        state = loaded.get_state()
+        state = loaded.dump_state()
         assert isinstance(state, dict)
         assert state["username"] == "alice"
         assert loaded.version == 1
@@ -25,7 +25,7 @@ class TestSnapshotStore:
         store = InMemorySnapshotStore()
         user = User("no-such-user")
         await store.load(user)
-        assert user.get_state() is None
+        assert user.dump_state() is None
         assert user.version == 0
 
     @pytest.mark.asyncio
@@ -40,17 +40,17 @@ class TestSnapshotStore:
         store = InMemorySnapshotStore()
 
         user = User("user-1")
-        user.sign_up("alice", "hash123")
-        user.mark_events_as_committed(1)
+        user.sign_up_with_username("alice", "hash123")
+        user.commit(1)
         await store.save(user)
 
         # Apply more events and re-snapshot
-        user.apply([{"schema_version": "AccountDeletedV1"}], 2)
+        user.rehydrate([{"type": "AccountDeletedV1"}], 2)
         await store.save(user)
 
         loaded = User("user-1")
         await store.load(loaded)
-        state = loaded.get_state()
+        state = loaded.dump_state()
         assert isinstance(state, dict)
         assert state["account_deleted"] is True
         assert loaded.version == 2

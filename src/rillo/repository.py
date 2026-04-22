@@ -33,11 +33,11 @@ class Repository(Generic[A], ABC):
         if len(events) == 0:
             return
         new_version = await self._save_events(aggregate.id, events, aggregate.version)
-        aggregate.mark_events_as_committed(new_version)
+        aggregate.commit(new_version)
 
     async def load(self, aggregate: A) -> None:
         events, version = await self._load_events(aggregate.id, aggregate.version)
-        aggregate.apply(events, version)
+        aggregate.rehydrate(events, version)
 
 
 __all__ = ["OptimisticConcurrencyError", "Repository"]

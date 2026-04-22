@@ -23,13 +23,13 @@ def mutator(func: Callable[..., None]) -> Callable[..., None]:
 
 class Aggregate(Generic[S]):
     _state_class: type[S]
-    _schema_discriminator: str = "schema_version"
-    _mutator_map: dict[type[BaseModel], str] = {}
-    _event_types: dict[str, type[BaseModel]] = {}
+    _schema_discriminator: str
+    _mutator_map: dict[type[BaseModel], str]
+    _event_types: dict[str, type[BaseModel]]
 
     def __init_subclass__(
         cls,
-        schema_discriminator: str = "schema_version",
+        schema_discriminator: str = "type",
         **kwargs: Any,
     ) -> None:
         super().__init_subclass__(**kwargs)
@@ -81,15 +81,15 @@ class Aggregate(Generic[S]):
     def _parse_state(self, state: JsonValue) -> S:
         return self._state_class.model_validate(state)
 
-    def _apply(self, event: BaseModel) -> None:
+    def _mutate(self, event: BaseModel) -> None:
         event_type = type(event)
         if event_type not in self._mutator_map:
             raise ValueError(f"No mutator registered for event type {event_type}.")
         method_name = self._mutator_map[event_type]
         getattr(self, method_name)(event)
 
-    def _publish(self, event: BaseModel) -> None:
-        self._apply(event)
+    def _apply(self, event: BaseModel) -> None:
+        self._mutate(event)
         self._pending_events.append(event)
 
     @property
@@ -104,7 +104,7 @@ class Aggregate(Generic[S]):
     def pending_events(self) -> list[JsonValue]:
         return [event.model_dump(mode="json") for event in self._pending_events]
 
-    def apply(self, events: Sequence[JsonValue], version: int) -> None:
+    def rehydrate(self, events: Sequence[JsonValue], version: int) -> None:
         original_state = None
         if self._state is not None:
             original_state = self._state.model_copy(deep=True)
@@ -112,14 +112,14 @@ class Aggregate(Generic[S]):
         try:
             for event in events:
                 parsed_event = self._parse_event(event)
-                self._apply(parsed_event)
+                self._mutate(parsed_event)
             self._version = version
         except Exception:
             self._state = original_state
             self._version = original_version
             raise
 
-    def get_state(self) -> JsonValue | None:
+    def dump_state(self) -> JsonValue | None:
         if self._state is None:
             return None
         return self._state.model_dump(mode="json")
@@ -130,7 +130,7 @@ class Aggregate(Generic[S]):
         self._version = version
         self._pending_events.clear()
 
-    def mark_events_as_committed(self, version: int) -> None:
+    def commit(self, version: int) -> None:
         self._pending_events.clear()
         self._version = version
 

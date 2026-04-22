@@ -28,7 +28,7 @@ class SnapshotStore(Generic[A], ABC):
         aggregate.load_state(state, version)
 
     async def save(self, aggregate: A) -> None:
-        state = aggregate.get_state()
+        state = aggregate.dump_state()
         version = aggregate.version
         if state is not None and version != 0:
             await self._save_state(aggregate.id, state, version)
