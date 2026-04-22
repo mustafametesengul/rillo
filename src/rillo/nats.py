@@ -8,7 +8,8 @@ try:
     from nats.js.kv import KeyValue
 except ImportError as e:
     raise ImportError(
-        "nats-py is required to use NATSRepository. Install it with: uv add rillo[nats]"
+        "nats-py is required to use NATSRepository. "
+        "Install it with: pip install 'rillo[nats]'"
     ) from e
 
 
@@ -24,7 +25,8 @@ _INVALID_SUBJECT_CHARS = set(".*> \t\n\r\0")
 def _validate_aggregate_id(aggregate_id: str) -> None:
     if not aggregate_id or any(c in _INVALID_SUBJECT_CHARS for c in aggregate_id):
         raise ValueError(
-            "aggregate_id must not be empty or contain '.', '*', '>', or whitespace characters"
+            "aggregate_id must not be empty or contain '.', '*', '>', "
+            "or whitespace characters"
         )
 
 
