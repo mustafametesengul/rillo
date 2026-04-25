@@ -1,12 +1,17 @@
 [project]
 name = "rillo"
 version = "0.1.0"
-description = "Add your description here"
+description = "Rillo is a lightweight, type-safe Event Sourcing framework for Python, built on top of Pydantic."
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.14"
 dependencies = [
     "pydantic>=2.13.1",
 ]
+
+[project.urls]
+Documentation = "https://mustafametesengul.github.io/rillo/"
+Source = "https://github.com/mustafametesengul/rillo"
 
 [project.optional-dependencies]
 nats = [
