@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
 from typing import Generic, Sequence, TypeVar, get_args, get_origin
 
-from pydantic import BaseModel, JsonValue, TypeAdapter
+from pydantic import JsonValue, TypeAdapter
 
-S = TypeVar("S", bound=BaseModel)
-E = TypeVar("E", bound=BaseModel)
-C = TypeVar("C", bound=BaseModel)
+S = TypeVar("S")
+E = TypeVar("E")
+C = TypeVar("C")
 
 
 class Aggregate(ABC, Generic[S, E, C]):
@@ -49,12 +49,17 @@ class Aggregate(ABC, Generic[S, E, C]):
 
     @property
     def pending_events(self) -> list[JsonValue]:
-        return [event.model_dump(mode="json") for event in self._pending_events]
+        return [
+            self._event_adapter.dump_python(event, mode="json")
+            for event in self._pending_events
+        ]
 
     def rehydrate(self, events: Sequence[JsonValue], version: int) -> None:
         original_state = None
         if self._state is not None:
-            original_state = self._state.model_copy(deep=True)
+            original_state = self._state_adapter.validate_python(
+                self._state_adapter.dump_python(self._state)
+            )
         original_version = self._version
         try:
             for event in events:
@@ -70,7 +75,7 @@ class Aggregate(ABC, Generic[S, E, C]):
     def dump_state(self) -> JsonValue | None:
         if self._state is None:
             return None
-        return self._state.model_dump(mode="json")
+        return self._state_adapter.dump_python(self._state, mode="json")
 
     def load_state(self, state: JsonValue, version: int) -> None:
         value = self._state_adapter.validate_python(state)
