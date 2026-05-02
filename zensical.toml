@@ -10,8 +10,8 @@ Copyright &copy; 2026 Mete Sengul
 
 [project.theme]
 language = "en"
-logo = "images/logo.svg"
-favicon = "images/logo.svg"
+logo = "logo.svg"
+favicon = "logo.svg"
 features = [
     "announce.dismiss",
     "content.code.annotate",

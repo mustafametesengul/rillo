@@ -1,6 +1,7 @@
-<p align="center">
-  <img src="images/logo.svg" alt="Rillo Logo" width="128">
-</p>
+<h3 align="center">
+  <img src="logo.svg" alt="Rillo Logo" width="96" style="vertical-align: middle;">
+  <span style="font-size: 64px; font-weight: bold; vertical-align: middle; margin-left: 16px; position: relative; top: 8px;">Rillo</span>
+</h3>
 
 # Rillo
 
@@ -14,7 +15,7 @@ Installing the core library using `pip`:
 pip install rillo
 ```
 
-Install with NATS JetStream support for repositories and snapshot stores:
+Install with [NATS](https://nats.io/) JetStream support for repositories and snapshot stores:
 
 ```bash
 pip install 'rillo[nats]'
