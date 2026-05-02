@@ -1,65 +1,34 @@
-import inspect
-from typing import Any, Callable, Generic, Sequence, TypeVar, get_args, get_type_hints
+import types
+from abc import ABC, abstractmethod
+from typing import Annotated, Generic, Sequence, TypeVar, Union, get_args, get_origin
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, Field, JsonValue, TypeAdapter
 
 S = TypeVar("S", bound=BaseModel)
+E = TypeVar("E", bound=BaseModel)
+C = TypeVar("C", bound=BaseModel)
 
 
-def mutator(func: Callable[..., None]) -> Callable[..., None]:
-    hints = get_type_hints(func)
-    params = list(inspect.signature(func).parameters)
-    if len(params) < 2:
-        raise TypeError("Mutator must have at least one event parameter besides self.")
-    event_param = params[1]
-    event_type = hints.get(event_param)
-    if event_type is None:
-        raise TypeError(
-            f"Mutator parameter '{event_param}' must have a type annotation."
-        )
-    setattr(func, "_event_type", event_type)
-    return func
+class Aggregate(ABC, Generic[S, E, C]):
+    _state_adapter: TypeAdapter[S]
+    _event_adapter: TypeAdapter[E]
 
-
-class Aggregate(Generic[S]):
-    _state_class: type[S]
-    _schema_discriminator: str
-    _mutator_map: dict[type[BaseModel], str]
-    _event_types: dict[str, type[BaseModel]]
-
-    def __init_subclass__(
-        cls,
-        schema_discriminator: str = "type",
-        **kwargs: Any,
-    ) -> None:
+    def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-
-        state_class = None
-        for base in getattr(cls, "__orig_bases__", ()):
-            if getattr(base, "__origin__", None) is Aggregate:
-                args = get_args(base)
-                if args and isinstance(args[0], type):
-                    state_class = args[0]
-                    break
-        if state_class is None:
-            raise TypeError("Aggregate subclasses must specify a state class.")
-        cls._state_class = state_class
-
-        cls._schema_discriminator = schema_discriminator
-
-        cls._mutator_map = dict(getattr(cls, "_mutator_map", {}))
-        cls._event_types = dict(getattr(cls, "_event_types", {}))
-
-        for attr_name in vars(cls):
-            attr = getattr(cls, attr_name)
-            if callable(attr) and hasattr(attr, "_event_type"):
-                event_type = getattr(attr, "_event_type")
-                cls._mutator_map[event_type] = attr_name
-                disc_annotation = event_type.model_fields[
-                    cls._schema_discriminator
-                ].annotation
-                disc_value = str(get_args(disc_annotation)[0])
-                cls._event_types[disc_value] = event_type
+        orig_bases = getattr(cls, "__orig_bases__", [])
+        for base in orig_bases:
+            if getattr(base, "__origin__", base) is Aggregate:
+                type_args = get_args(base)
+                if len(type_args) >= 2:
+                    cls._state_adapter = TypeAdapter(type_args[0])
+                    event_type = type_args[1]
+                    unwrapped = getattr(event_type, "__value__", event_type)
+                    if get_origin(unwrapped) is Union or isinstance(
+                        unwrapped, types.UnionType
+                    ):
+                        event_type = Annotated[event_type, Field(discriminator="type")]
+                    cls._event_adapter = TypeAdapter(event_type)
+                break
 
     def __init__(self, id: str) -> None:
         self._id: str = id
@@ -67,29 +36,20 @@ class Aggregate(Generic[S]):
         self._pending_events: list[BaseModel] = []
         self._version: int = 0
 
-    def _parse_event(self, event: JsonValue) -> BaseModel:
-        if type(event) is not dict or self._schema_discriminator not in event:
-            raise ValueError("Event must be a JSON object.")
-        event_type_value = event[self._schema_discriminator]
+    @abstractmethod
+    def apply(self, event: E) -> None: ...
 
-        if event_type_value not in self._event_types:
-            raise ValueError(f"Unknown event type: {event_type_value}")
+    @abstractmethod
+    def execute(self, command: C) -> None: ...
 
-        event_type = self._event_types[event_type_value]
-        return event_type.model_validate(event)
+    def _parse_event(self, event: JsonValue) -> E:
+        return self._event_adapter.validate_python(event)
 
     def _parse_state(self, state: JsonValue) -> S:
-        return self._state_class.model_validate(state)
+        return self._state_adapter.validate_python(state)
 
-    def _mutate(self, event: BaseModel) -> None:
-        event_type = type(event)
-        if event_type not in self._mutator_map:
-            raise ValueError(f"No mutator registered for event type {event_type}.")
-        method_name = self._mutator_map[event_type]
-        getattr(self, method_name)(event)
-
-    def _apply(self, event: BaseModel) -> None:
-        self._mutate(event)
+    def _emit(self, event: E) -> None:
+        self.apply(event)
         self._pending_events.append(event)
 
     @property
@@ -112,7 +72,7 @@ class Aggregate(Generic[S]):
         try:
             for event in events:
                 parsed_event = self._parse_event(event)
-                self._mutate(parsed_event)
+                self.apply(parsed_event)
             self._version = version
         except Exception:
             self._state = original_state
@@ -135,4 +95,4 @@ class Aggregate(Generic[S]):
         self._version = version
 
 
-__all__ = ["Aggregate", "mutator"]
+__all__ = ["Aggregate"]
