@@ -39,12 +39,6 @@ class Aggregate(ABC, Generic[S, E, C]):
     @abstractmethod
     def execute(self, command: C) -> None: ...
 
-    def _parse_event(self, event: JsonValue) -> E:
-        return self._event_adapter.validate_python(event)
-
-    def _parse_state(self, state: JsonValue) -> S:
-        return self._state_adapter.validate_python(state)
-
     def _emit(self, event: E) -> None:
         self.apply(event)
         self._pending_events.append(event)
@@ -68,7 +62,7 @@ class Aggregate(ABC, Generic[S, E, C]):
         original_version = self._version
         try:
             for event in events:
-                parsed_event = self._parse_event(event)
+                parsed_event = self._event_adapter.validate_python(event)
                 self.apply(parsed_event)
             self._version = version
         except Exception:
@@ -82,7 +76,7 @@ class Aggregate(ABC, Generic[S, E, C]):
         return self._state.model_dump(mode="json")
 
     def load_state(self, state: JsonValue, version: int) -> None:
-        value = self._parse_state(state)
+        value = self._state_adapter.validate_python(state)
         self._state = value
         self._version = version
         self._pending_events.clear()
