@@ -1,6 +1,6 @@
 [project]
 name = "rillo"
-version = "0.2.3"
+version = "0.2.4"
 description = "Rillo is a lightweight, type-safe Event Sourcing framework for Python, built on top of Pydantic."
 readme = "README.md"
 license = "Apache-2.0"
