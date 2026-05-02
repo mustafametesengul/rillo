@@ -10,6 +10,8 @@ Copyright &copy; 2026 Mete Sengul
 
 [project.theme]
 language = "en"
+logo = "images/logo.svg"
+favicon = "images/logo.svg"
 features = [
     "announce.dismiss",
     "content.code.annotate",
@@ -31,14 +33,14 @@ features = [
 
 [[project.theme.palette]]
 scheme = "slate"
-primary = "indigo"
-accent = "indigo"
+primary = "light blue"
+accent = "light blue"
 toggle.icon = "lucide/moon"
 toggle.name = "Switch to light mode"
 
 [[project.theme.palette]]
 scheme = "default"
-primary = "indigo"
-accent = "indigo"
+primary = "light blue"
+accent = "light blue"
 toggle.icon = "lucide/sun"
 toggle.name = "Switch to dark mode"
