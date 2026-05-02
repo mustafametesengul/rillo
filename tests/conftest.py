@@ -33,8 +33,15 @@ class State(BaseModel):
     account_deleted: bool
 
 
-type Event = Annotated[UserSignedUp | AccountDeleted, Field(discriminator="type")]
-type Command = SignUpWithUsername | DeleteAccount
+type Event = Annotated[
+    UserSignedUp | AccountDeleted,
+    Field(discriminator="type"),
+]
+
+type Command = Annotated[
+    SignUpWithUsername | DeleteAccount,
+    Field(discriminator="type"),
+]
 
 
 class User(Aggregate[State, Event, Command]):

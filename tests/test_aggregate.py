@@ -17,8 +17,8 @@ class TestAggregateInit:
         assert user.pending_events == []
 
 
-class TestPublishAndMutate:
-    def test_publish_applies_event(self, user: User) -> None:
+class TestExecuteAndApply:
+    def test_execute_applies_event(self, user: User) -> None:
         user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         state = user.dump_state()
         assert isinstance(state, dict)
@@ -26,7 +26,7 @@ class TestPublishAndMutate:
         assert state["password_hash"] == "hash123"
         assert state["account_deleted"] is False
 
-    def test_publish_adds_pending_event(self, user: User) -> None:
+    def test_execute_adds_pending_event(self, user: User) -> None:
         user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         assert len(user.pending_events) == 1
         pending = user.pending_events[0]
@@ -52,8 +52,8 @@ class TestPublishAndMutate:
         }
 
 
-class TestApplyFromJson:
-    def test_apply_single_event(self, user: User) -> None:
+class TestRehydrate:
+    def test_rehydrate_single_event(self, user: User) -> None:
         events: list[JsonValue] = [
             {
                 "type": "UserSignedUpV1",
@@ -67,7 +67,7 @@ class TestApplyFromJson:
         assert state["username"] == "bob"
         assert user.version == 1
 
-    def test_apply_multiple_events(self, user: User) -> None:
+    def test_rehydrate_multiple_events(self, user: User) -> None:
         events: list[JsonValue] = [
             {
                 "type": "UserSignedUpV1",
@@ -82,7 +82,7 @@ class TestApplyFromJson:
         assert state["account_deleted"] is True
         assert user.version == 2
 
-    def test_apply_does_not_add_pending_events(self, user: User) -> None:
+    def test_rehydrate_does_not_add_pending_events(self, user: User) -> None:
         events: list[JsonValue] = [
             {
                 "type": "UserSignedUpV1",
@@ -141,6 +141,6 @@ class TestDomainLogicErrors:
 
 
 class TestUnregisteredEvent:
-    def test_apply_unregistered_event_raises(self, user: User) -> None:
+    def test_rehydrate_unregistered_event_raises(self, user: User) -> None:
         with pytest.raises(Exception):
             user.rehydrate([{"type": "UnknownV1"}], 1)

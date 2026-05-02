@@ -27,12 +27,12 @@ uv add rillo[nats]
 
 ### Defining an Aggregate
 
-Rillo uses Pydantic models for Events and State. Creating an `Aggregate` requires defining your State, Events, and mapping changes via the `@mutator` decorator.
+Rillo uses Pydantic models for State, Events, and Commands. Creating an `Aggregate` requires three type parameters and implementing the abstract `apply()` and `execute()` methods.
 
 ```python
-from typing import Literal
-from pydantic import BaseModel
-from rillo import Aggregate, mutator
+from typing import Annotated, Literal
+from pydantic import BaseModel, Field
+from rillo import Aggregate
 
 # 1. Define events
 class UserSignedUp(BaseModel):
@@ -42,45 +42,54 @@ class UserSignedUp(BaseModel):
 class AccountDeleted(BaseModel):
     type: Literal["AccountDeletedV1"] = "AccountDeletedV1"
 
-# 2. Define aggregate state
+# 2. Define commands
+class SignUp(BaseModel):
+    type: Literal["SignUpV1"] = "SignUpV1"
+    username: str
+
+class DeleteAccount(BaseModel):
+    type: Literal["DeleteAccountV1"] = "DeleteAccountV1"
+
+# 3. Define aggregate state
 class UserState(BaseModel):
     type: Literal["UserStateV1"] = "UserStateV1"
     username: str
     account_deleted: bool
 
-# 3. Create the Aggregate
-class User(Aggregate[UserState]):
+# Type aliases with discriminators for union types
+type Event = Annotated[UserSignedUp | AccountDeleted, Field(discriminator="type")]
+type Command = Annotated[SignUp | DeleteAccount, Field(discriminator="type")]
 
-    # Mutators specify how an event modifies the internal state
-    @mutator
-    def on_user_signed_up(self, event: UserSignedUp) -> None:
-        self._state = UserState(
-            username=event.username,
-            account_deleted=False,
-        )
+# 4. Create the Aggregate with [State, Event, Command] type parameters
+class User(Aggregate[UserState, Event, Command]):
 
-    @mutator
-    def on_account_deleted(self, event: AccountDeleted) -> None:
-        if self._state is not None:
-            self._state.account_deleted = True
+    # apply() maps each event to a state mutation
+    def apply(self, event: Event) -> None:
+        match event:
+            case UserSignedUp(username=username):
+                self._state = UserState(username=username, account_deleted=False)
+            case AccountDeleted():
+                if self._state is not None:
+                    self._state.account_deleted = True
 
-    # Business logic generates and applies new events
-    def sign_up(self, username: str) -> None:
-        if self._state is not None:
-            raise ValueError("User already exists.")
-
-        self._apply(UserSignedUp(username=username))
-
-    def delete_account(self) -> None:
-        if self._state is None:
-            raise ValueError("User does not exist.")
-
-        self._apply(AccountDeleted())
+    # execute() contains business logic and emits events via _emit()
+    def execute(self, command: Command) -> None:
+        match command:
+            case SignUp(username=username):
+                if self._state is not None:
+                    raise ValueError("User already exists.")
+                self._emit(UserSignedUp(username=username))
+            case DeleteAccount():
+                if self._state is None:
+                    raise ValueError("User does not exist.")
+                if self._state.account_deleted:
+                    raise ValueError("Account is already deleted.")
+                self._emit(AccountDeleted())
 
 # Using the aggregate
 user = User(id="user-1")
-user.sign_up("alice")
-user.delete_account()
+user.execute(SignUp(username="alice"))
+user.execute(DeleteAccount())
 
 # Pending events are stored and ready to be committed
 events = user.pending_events
@@ -93,7 +102,7 @@ Rillo provides a `Repository` base class to save/load events and a `SnapshotStor
 ```python
 import asyncio
 from nats.aio.client import Client as NATS
-from rillo.nats import NATSRepository
+from rillo.nats import NATSRepository, NATSSnapshotStore
 
 async def main():
     nc = NATS()
@@ -108,7 +117,7 @@ async def main():
     )
 
     user = User("user-123")
-    user.sign_up("alice")
+    user.execute(SignUp(username="alice"))
 
     # Persist pending events into NATS JetStream
     await repository.save(user)
@@ -116,6 +125,18 @@ async def main():
     # Rehydrate aggregate state back from the event stream
     loaded_user = User("user-123")
     await repository.load(loaded_user)
+
+    # Snapshot store uses a NATS KV bucket to cache aggregate state
+    kv = await js.key_value("users-snapshots")
+    snapshot_store = NATSSnapshotStore[User](kv=kv)
+
+    # Save a snapshot of the current aggregate state
+    await snapshot_store.save(loaded_user)
+
+    # Load the snapshot before replaying remaining events
+    restored_user = User("user-123")
+    await snapshot_store.load(restored_user)
+    await repository.load(restored_user)  # replays only events after the snapshot
 
 if __name__ == "__main__":
     asyncio.run(main())
