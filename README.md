@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://github.com/mustafametesengul/rillo/raw/main/docs/images/logo.svg" alt="Rillo Logo" width="128">
+</p>
+
 # Rillo
 
 Rillo is a lightweight, type-safe Event Sourcing framework for Python, built on top of [Pydantic](https://docs.pydantic.dev/).
