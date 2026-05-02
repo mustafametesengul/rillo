@@ -1,7 +1,6 @@
-<h3 align="center">
-  <img src="https://github.com/mustafametesengul/rillo/raw/main/docs/logo.svg" alt="Rillo Logo" width="96" style="vertical-align: middle;">
-  <span style="font-size: 64px; font-weight: bold; vertical-align: middle; margin-left: 16px; position: relative; top: 8px;">Rillo</span>
-</h3>
+<p align="center">
+  <img src="https://github.com/mustafametesengul/rillo/raw/main/docs/hero.svg" alt="Rillo Hero" width="196">
+</p>
     
 # Rillo
 
