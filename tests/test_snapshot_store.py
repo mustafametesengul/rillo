@@ -1,5 +1,5 @@
 import pytest
-from conftest import User
+from conftest import SignUpWithUsername, User
 from test_repository import InMemorySnapshotStore
 
 
@@ -8,7 +8,7 @@ class TestSnapshotStore:
     async def test_save_and_load(self) -> None:
         store = InMemorySnapshotStore()
         user = User("user-1")
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         user.commit(1)
 
         await store.save(user)
@@ -40,7 +40,7 @@ class TestSnapshotStore:
         store = InMemorySnapshotStore()
 
         user = User("user-1")
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         user.commit(1)
         await store.save(user)
 

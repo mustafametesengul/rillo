@@ -3,7 +3,7 @@ from uuid import uuid4
 import nats
 import pytest
 import pytest_asyncio
-from conftest import User
+from conftest import DeleteAccount, SignUpWithUsername, User
 
 from rillo import OptimisticConcurrencyError
 from rillo.nats import NATSRepository, NATSSnapshotStore
@@ -44,7 +44,7 @@ class TestNATSRepositorySave:
     @pytest.mark.asyncio
     async def test_save_and_load(self, repo: NATSRepository[User]) -> None:
         user = User("user-1")
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         await repo.save(user)
 
         loaded = User("user-1")
@@ -58,14 +58,14 @@ class TestNATSRepositorySave:
     @pytest.mark.asyncio
     async def test_save_clears_pending_events(self, repo: NATSRepository[User]) -> None:
         user = User("user-1")
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         await repo.save(user)
         assert user.pending_events == []
 
     @pytest.mark.asyncio
     async def test_save_updates_version(self, repo: NATSRepository[User]) -> None:
         user = User("user-1")
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         await repo.save(user)
         assert user.version is not None
         assert user.version > 0
@@ -73,8 +73,8 @@ class TestNATSRepositorySave:
     @pytest.mark.asyncio
     async def test_save_multiple_events(self, repo: NATSRepository[User]) -> None:
         user = User("user-1")
-        user.sign_up_with_username("alice", "hash123")
-        user.delete_account()
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
+        user.execute(DeleteAccount())
         await repo.save(user)
 
         loaded = User("user-1")
@@ -101,10 +101,10 @@ class TestNATSRepositoryLoad:
     @pytest.mark.asyncio
     async def test_load_multiple_saves(self, repo: NATSRepository[User]) -> None:
         user = User("user-1")
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         await repo.save(user)
 
-        user.delete_account()
+        user.execute(DeleteAccount())
         await repo.save(user)
 
         loaded = User("user-1")
@@ -119,7 +119,7 @@ class TestNATSOptimisticConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_save_raises(self, repo: NATSRepository[User]) -> None:
         user = User("user-1")
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         await repo.save(user)
 
         user_a = User("user-1")
@@ -128,10 +128,10 @@ class TestNATSOptimisticConcurrency:
         user_b = User("user-1")
         await repo.load(user_b)
 
-        user_a.delete_account()
+        user_a.execute(DeleteAccount())
         await repo.save(user_a)
 
-        user_b.delete_account()
+        user_b.execute(DeleteAccount())
         with pytest.raises(OptimisticConcurrencyError):
             await repo.save(user_b)
 
@@ -142,7 +142,7 @@ class TestNATSSnapshotStore:
         self, snapshot_store: NATSSnapshotStore[User]
     ) -> None:
         user = User("user-1")
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         user.commit(1)
 
         await snapshot_store.save(user)
@@ -172,11 +172,11 @@ class TestNATSRepositoryWithSnapshots:
         snapshot_store: NATSSnapshotStore[User],
     ) -> None:
         user = User("user-1")
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         await repo.save(user)
         await snapshot_store.save(user)
 
-        user.delete_account()
+        user.execute(DeleteAccount())
         await repo.save(user)
 
         loaded = User("user-1")

@@ -1,7 +1,7 @@
 from typing import Sequence
 
 import pytest
-from conftest import User
+from conftest import DeleteAccount, SignUpWithUsername, User
 from pydantic import JsonValue
 
 from rillo import OptimisticConcurrencyError, Repository
@@ -67,7 +67,7 @@ class TestRepositorySave:
     async def test_save_persists_events(
         self, user: User, repo: InMemoryRepository
     ) -> None:
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         await repo.save(user)
         assert repo._streams["user-1"] == [
             {
@@ -81,7 +81,7 @@ class TestRepositorySave:
     async def test_save_clears_pending_events(
         self, user: User, repo: InMemoryRepository
     ) -> None:
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         await repo.save(user)
         assert user.pending_events == []
 
@@ -89,7 +89,7 @@ class TestRepositorySave:
     async def test_save_updates_version(
         self, user: User, repo: InMemoryRepository
     ) -> None:
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         await repo.save(user)
         assert user.version == 1
 
@@ -104,8 +104,8 @@ class TestRepositorySave:
     async def test_save_multiple_events(
         self, user: User, repo: InMemoryRepository
     ) -> None:
-        user.sign_up_with_username("alice", "hash123")
-        user.delete_account()
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
+        user.execute(DeleteAccount())
         await repo.save(user)
         assert len(repo._streams["user-1"]) == 2
         assert user.version == 2
@@ -115,7 +115,7 @@ class TestRepositoryLoad:
     @pytest.mark.asyncio
     async def test_load_restores_state(self, repo: InMemoryRepository) -> None:
         user = User("user-1")
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         await repo.save(user)
 
         loaded_user = User("user-1")
@@ -137,7 +137,7 @@ class TestOptimisticConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_save_raises(self, repo: InMemoryRepository) -> None:
         user1 = User("user-1")
-        user1.sign_up_with_username("alice", "hash123")
+        user1.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         await repo.save(user1)
 
         # Simulate two loads of the same aggregate
@@ -148,11 +148,11 @@ class TestOptimisticConcurrency:
         await repo.load(user_b)
 
         # Both try to save - first succeeds
-        user_a.delete_account()
+        user_a.execute(DeleteAccount())
         await repo.save(user_a)
 
         # Second should fail with concurrency error
-        user_b.delete_account()
+        user_b.execute(DeleteAccount())
         with pytest.raises(OptimisticConcurrencyError):
             await repo.save(user_b)
 
@@ -164,14 +164,14 @@ class TestRepositoryWithSnapshotStore:
 
         # Save initial events
         user = User("user-1")
-        user.sign_up_with_username("alice", "hash123")
+        user.execute(SignUpWithUsername(username="alice", password_hash="hash123"))
         await repo.save(user)
 
         # Store snapshot
         await snapshot_store.save(user)
 
         # Add more events after snapshot
-        user.delete_account()
+        user.execute(DeleteAccount())
         await repo.save(user)
 
         # Load from scratch - should use snapshot + remaining events

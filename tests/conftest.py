@@ -1,9 +1,9 @@
-from typing import Literal
+from typing import Annotated, Literal, override
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from rillo import Aggregate, mutator
+from rillo import Aggregate
 
 
 class UserSignedUp(BaseModel):
@@ -16,39 +16,64 @@ class AccountDeleted(BaseModel):
     type: Literal["AccountDeletedV1"] = "AccountDeletedV1"
 
 
-class UserState(BaseModel):
+class SignUpWithUsername(BaseModel):
+    type: Literal["SignUpWithUsernameV1"] = "SignUpWithUsernameV1"
+    username: str
+    password_hash: str
+
+
+class DeleteAccount(BaseModel):
+    type: Literal["DeleteAccountV1"] = "DeleteAccountV1"
+
+
+class State(BaseModel):
     type: Literal["UserStateV1"] = "UserStateV1"
     username: str
     password_hash: str
     account_deleted: bool
 
 
-class User(Aggregate[UserState]):
-    @mutator
-    def on_user_signed_up(self, event: UserSignedUp) -> None:
-        self._state = UserState(
-            username=event.username,
-            password_hash=event.password_hash,
-            account_deleted=False,
-        )
+type Event = Annotated[
+    UserSignedUp | AccountDeleted,
+    Field(discriminator="type"),
+]
 
-    @mutator
-    def on_account_deleted(self, _: AccountDeleted) -> None:
-        if self._state is None:
-            raise ValueError("User does not exist.")
-        self._state.account_deleted = True
+type Command = Annotated[
+    SignUpWithUsername | DeleteAccount,
+    Field(discriminator="type"),
+]
 
-    def sign_up_with_username(self, username: str, password_hash: str) -> None:
-        if self._state is not None:
-            raise ValueError("User already exists.")
-        self._apply(UserSignedUp(username=username, password_hash=password_hash))
 
-    def delete_account(self) -> None:
-        if self._state is None:
-            raise ValueError("User does not exist.")
-        if self._state.account_deleted:
-            raise ValueError("Account is already deleted.")
-        self._apply(AccountDeleted())
+class User(Aggregate[State, Event, Command]):
+    @override
+    def apply(self, event: Event) -> None:
+        match event:
+            case UserSignedUp(username=username, password_hash=password_hash):
+                self._state = State(
+                    username=username,
+                    password_hash=password_hash,
+                    account_deleted=False,
+                )
+
+            case AccountDeleted():
+                if self._state is None:
+                    return
+                self._state.account_deleted = True
+
+    @override
+    def execute(self, command: Command) -> None:
+        match command:
+            case SignUpWithUsername(username=username, password_hash=password_hash):
+                if self._state is not None:
+                    raise ValueError("User already exists.")
+                self._emit(UserSignedUp(username=username, password_hash=password_hash))
+
+            case DeleteAccount():
+                if self._state is None:
+                    raise ValueError("User does not exist.")
+                if self._state.account_deleted:
+                    raise ValueError("Account is already deleted.")
+                self._emit(AccountDeleted())
 
 
 @pytest.fixture
