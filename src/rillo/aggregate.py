@@ -11,16 +11,21 @@ C = TypeVar("C", bound=BaseModel)
 class Aggregate(ABC, Generic[S, E, C]):
     _state_adapter: TypeAdapter[S]
     _event_adapter: TypeAdapter[E]
+    _command_adapter: TypeAdapter[C]
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        orig_bases = getattr(cls, "__orig_bases__", [])
-        for base in orig_bases:
+        state_type, event_type, command_type = cls._aggregate_types()
+        cls._state_adapter = TypeAdapter(state_type)
+        cls._event_adapter = TypeAdapter(event_type)
+        cls._command_adapter = TypeAdapter(command_type)
+
+    @classmethod
+    def _aggregate_types(cls) -> tuple[type[S], type[E], type[C]]:
+        for base in getattr(cls, "__orig_bases__", ()):
             if get_origin(base) is Aggregate:
-                type_args = get_args(base)
-                cls._state_adapter = TypeAdapter(type_args[0])
-                cls._event_adapter = TypeAdapter(type_args[1])
-                break
+                return get_args(base)
+        raise TypeError("Aggregate subclasses must specify type parameters S, E, and C")
 
     def __init__(self, id: str) -> None:
         self._id: str = id
