@@ -1,7 +1,7 @@
-from typing import Literal, override
+from typing import Annotated, Literal, override
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from rillo import Aggregate
 
@@ -33,7 +33,7 @@ class State(BaseModel):
     account_deleted: bool
 
 
-type Event = UserSignedUp | AccountDeleted
+type Event = Annotated[UserSignedUp | AccountDeleted, Field(discriminator="type")]
 type Command = SignUpWithUsername | DeleteAccount
 
 

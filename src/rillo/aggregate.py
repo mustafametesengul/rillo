@@ -1,8 +1,7 @@
-import types
 from abc import ABC, abstractmethod
-from typing import Annotated, Generic, Sequence, TypeVar, Union, get_args, get_origin
+from typing import Generic, Sequence, TypeVar, get_args, get_origin
 
-from pydantic import BaseModel, Field, JsonValue, TypeAdapter
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 S = TypeVar("S", bound=BaseModel)
 E = TypeVar("E", bound=BaseModel)
@@ -17,23 +16,16 @@ class Aggregate(ABC, Generic[S, E, C]):
         super().__init_subclass__(**kwargs)
         orig_bases = getattr(cls, "__orig_bases__", [])
         for base in orig_bases:
-            if getattr(base, "__origin__", base) is Aggregate:
+            if get_origin(base) is Aggregate:
                 type_args = get_args(base)
-                if len(type_args) >= 2:
-                    cls._state_adapter = TypeAdapter(type_args[0])
-                    event_type = type_args[1]
-                    unwrapped = getattr(event_type, "__value__", event_type)
-                    if get_origin(unwrapped) is Union or isinstance(
-                        unwrapped, types.UnionType
-                    ):
-                        event_type = Annotated[event_type, Field(discriminator="type")]
-                    cls._event_adapter = TypeAdapter(event_type)
+                cls._state_adapter = TypeAdapter(type_args[0])
+                cls._event_adapter = TypeAdapter(type_args[1])
                 break
 
     def __init__(self, id: str) -> None:
         self._id: str = id
         self._state: S | None = None
-        self._pending_events: list[BaseModel] = []
+        self._pending_events: list[E] = []
         self._version: int = 0
 
     @abstractmethod
