@@ -51,7 +51,7 @@ class DeleteAccount(BaseModel):
     type: Literal["DeleteAccountV1"] = "DeleteAccountV1"
 
 # 3. Define aggregate state
-class UserState(BaseModel):
+class State(BaseModel):
     type: Literal["UserStateV1"] = "UserStateV1"
     username: str
     account_deleted: bool
@@ -61,13 +61,13 @@ type Event = Annotated[UserSignedUp | AccountDeleted, Field(discriminator="type"
 type Command = Annotated[SignUp | DeleteAccount, Field(discriminator="type")]
 
 # 4. Create the Aggregate with [State, Event, Command] type parameters
-class User(Aggregate[UserState, Event, Command]):
+class User(Aggregate[State, Event, Command]):
 
     # apply() maps each event to a state mutation
     def apply(self, event: Event) -> None:
         match event:
             case UserSignedUp(username=username):
-                self._state = UserState(username=username, account_deleted=False)
+                self._state = State(username=username, account_deleted=False)
             case AccountDeleted():
                 if self._state is not None:
                     self._state.account_deleted = True
